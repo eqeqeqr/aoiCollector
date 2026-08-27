@@ -34,8 +34,9 @@
           }
         }
       }
-      if (pl.length > 0) {
-        window.postMessage({ type: '__AOI_SEARCH', rings, first: pl[0] }, '*');
+      if (Object.keys(rings).length > 0) {
+        const first = pl[0];
+        window.postMessage({ type: '__AOI_SEARCH', rings, first }, '*');
       }
     } catch {}
   }
@@ -81,29 +82,31 @@
         + '&zoom=17&keywords=' + encodeURIComponent(name);
       of.call(window, url).then(r => r.text()).then(t => {
         try {
-          const j = JSON.parse(t);
-          const pl = (j.data && j.data.poi_list) || [];
+          const d = JSON.parse(t);
+          const pl = (d && d.data && d.data.poi_list) || [];
+          console.log('[AOI Hook] 搜索结果数:', pl.length);
+          const rings = {};
           for (let i = 0; i < pl.length; i++) {
-            if (pl[i].id === poiid) {
-              const dl = pl[i].domain_list || [];
-              for (let k = 0; k < dl.length; k++) {
-                if (dl[k].name === 'aoi' && dl[k].value && dl[k].value.indexOf('_') > 0) {
-                  const rings = {};
-                  rings[poiid] = {
-                    v: dl[k].value,
-                    x: pl[i].longitude, y: pl[i].latitude,
-                    a: pl[i].address || '', c: pl[i].cityname || ''
-                  };
-                  window.postMessage({ type: '__AOI_SEARCH', rings, first: pl[i] }, '*');
-                  console.log('[AOI Hook] 搜索到 AOI:', name);
-                  return;
-                }
+            const pp = pl[i], dl = pp.domain_list || [];
+            console.log('[AOI Hook] POI:', pp.id, pp.name, 'domains:', dl.map(x => x.name).join(','));
+            for (let k = 0; k < dl.length; k++) {
+              if (dl[k].name === 'aoi' && dl[k].value && dl[k].value.indexOf('_') > 0 && pp.id) {
+                rings[pp.id] = {
+                  v: dl[k].value,
+                  x: pp.longitude, y: pp.latitude,
+                  a: pp.address || '', c: pp.cityname || ''
+                };
               }
             }
           }
-          console.log('[AOI Hook] 未找到 AOI:', name);
-        } catch {}
-      }).catch(() => {});
+          if (Object.keys(rings).length > 0) {
+            window.postMessage({ type: '__AOI_SEARCH', rings, first: pl[0] }, '*');
+            console.log('[AOI Hook] 搜索到 AOI, 数量:', Object.keys(rings).length);
+          } else {
+            console.log('[AOI Hook] 搜索结果中无 AOI 数据');
+          }
+        } catch(e) { console.error('[AOI Hook] 搜索解析失败:', e); }
+      }).catch(e => console.error('[AOI Hook] 搜索请求失败:', e));
     }
   });
 
