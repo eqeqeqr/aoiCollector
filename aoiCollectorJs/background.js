@@ -91,26 +91,40 @@ function convertRing(ringStr, sep) {
   return pts;
 }
 
+function transformlat(lng, lat) {
+  const pi = 3.1415926535897932384626;
+  let ret = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat +
+    0.1 * lng * lat + 0.2 * Math.sqrt(Math.abs(lng));
+  ret += (20.0 * Math.sin(6.0 * lng * pi) + 20.0 * Math.sin(2.0 * lng * pi)) * 2.0 / 3.0;
+  ret += (20.0 * Math.sin(lat * pi) + 40.0 * Math.sin(lat / 3.0 * pi)) * 2.0 / 3.0;
+  ret += (160.0 * Math.sin(lat / 12.0 * pi) + 320 * Math.sin(lat * pi / 30.0)) * 2.0 / 3.0;
+  return ret;
+}
+
+function transformlng(lng, lat) {
+  const pi = 3.1415926535897932384626;
+  let ret = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng +
+    0.1 * lng * lat + 0.1 * Math.sqrt(Math.abs(lng));
+  ret += (20.0 * Math.sin(6.0 * lng * pi) + 20.0 * Math.sin(2.0 * lng * pi)) * 2.0 / 3.0;
+  ret += (20.0 * Math.sin(lng * pi) + 40.0 * Math.sin(lng / 3.0 * pi)) * 2.0 / 3.0;
+  ret += (150.0 * Math.sin(lng / 12.0 * pi) + 300.0 * Math.sin(lng / 30.0 * pi)) * 2.0 / 3.0;
+  return ret;
+}
+
 function gcj02towgs84(lng, lat) {
   const pi = 3.1415926535897932384626;
   const a = 6378245.0;
   const ee = 0.00669342162296594323;
   if (!(72.004 <= lng && lng <= 137.8347 && 0.8293 <= lat && lat <= 55.8271)) return [lng, lat];
-  let dlat = -100 + 2*lng + 3*lat + 0.2*lat*lat + 0.1*lng*lat + 0.2*Math.sqrt(Math.abs(lng));
-  dlat += (20*Math.sin(6*lng*pi) + 20*Math.sin(2*lng*pi)) * 2/3;
-  dlat += (20*Math.sin(lat*pi) + 40*Math.sin(lat/3*pi)) * 2/3;
-  dlat += (160*Math.sin(lat/12*pi) + 320*Math.sin(lat*pi/30)) * 2/3;
-  let dlng = 300 + lng + 2*lat + 0.1*lng*lng + 0.1*lng*lat + 0.1*Math.sqrt(Math.abs(lng));
-  dlng += (20*Math.sin(6*lng*pi) + 20*Math.sin(2*lng*pi)) * 2/3;
-  dlng += (20*Math.sin(lng*pi) + 40*Math.sin(lng/3*pi)) * 2/3;
-  dlng += (150*Math.sin(lng/12*pi) + 300*Math.sin(lng/30*pi)) * 2/3;
-  const radlat = lat / 180 * pi;
+  let dlat = transformlat(lng - 105.0, lat - 35.0);
+  let dlng = transformlng(lng - 105.0, lat - 35.0);
+  const radlat = lat / 180.0 * pi;
   let magic = Math.sin(radlat);
   magic = 1 - ee * magic * magic;
   const sqrtmagic = Math.sqrt(magic);
-  dlat = (dlat*180) / ((a*(1-ee))/(magic*sqrtmagic)*pi);
-  dlng = (dlng*180) / (a/sqrtmagic*Math.cos(radlat)*pi);
-  return [lng*2 - (lng+dlng), lat*2 - (lat+dlat)];
+  dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * pi);
+  dlng = (dlng * 180.0) / (a / sqrtmagic * Math.cos(radlat) * pi);
+  return [lng * 2 - (lng + dlng), lat * 2 - (lat + dlat)];
 }
 
 // ================== 消息处理 ==================
