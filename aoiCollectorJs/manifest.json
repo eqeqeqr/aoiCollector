@@ -6,20 +6,26 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "host_permissions": [
     "https://map.gaode.com/*",
     "https://*.map.gaode.com/*"
   ],
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
       "matches": ["https://map.gaode.com/*", "https://*.map.gaode.com/*"],
-      "js": ["libs/coord.js", "content.js"],
+      "js": ["libs/coord.js", "hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://map.gaode.com/*", "https://*.map.gaode.com/*"],
+      "js": ["content.js"],
       "run_at": "document_idle"
     }
   ],

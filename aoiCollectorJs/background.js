@@ -6,6 +6,8 @@ const DB_NAME = 'aoi_collector';
 const DB_VERSION = 1;
 const STORE_NAME = 'aois';
 
+console.log('[AOI BG] Service Worker 已启动', new Date().toLocaleTimeString());
+
 // ================== IndexedDB ==================
 let db = null;
 
@@ -149,53 +151,56 @@ function buildTextExport(a) {
 
 // ================== 消息处理 ==================
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === 'SAVE_AOI') {
-    handleSaveAOI(msg.data).then(r => sendResponse(r)).catch(e => sendResponse({ ok: false, err: e.message }));
-    return true; // async
-  }
-  if (msg.type === 'GET_ALL') {
-    dbGetAll().then(list => sendResponse({ ok: true, data: list })).catch(e => sendResponse({ ok: false, err: e.message }));
-    return true;
-  }
-  if (msg.type === 'GET_COUNT') {
-    dbCount().then(n => sendResponse({ ok: true, count: n })).catch(e => sendResponse({ ok: false, err: e.message }));
-    return true;
-  }
-  if (msg.type === 'DELETE_AOI') {
-    dbDelete(msg.poiid).then(() => sendResponse({ ok: true })).catch(e => sendResponse({ ok: false, err: e.message }));
-    return true;
-  }
-  if (msg.type === 'EXPORT_GEOJSON') {
-    dbGetAll().then(list => {
-      const geojson = buildGeoJSON(list);
-      const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      chrome.downloads.download({ url, filename: `aoi_${Date.now()}.geojson`, saveAs: true });
-      sendResponse({ ok: true });
-    }).catch(e => sendResponse({ ok: false, err: e.message }));
-    return true;
-  }
-  if (msg.type === 'EXPORT_SQLITE') {
-    // 导出为 SQLite 文件 (简单二进制格式)
-    dbGetAll().then(list => {
-      exportAsSQLite(list).then(blob => {
-        const url = URL.createObjectURL(blob);
-        chrome.downloads.download({ url, filename: `aoi_${Date.now()}.db`, saveAs: true });
-        sendResponse({ ok: true });
+  console.log('[AOI BG] 收到消息:', msg.type);
+  try {
+    if (msg.type === 'SAVE_AOI') {
+      handleSaveAOI(msg.data).then(r => {
+        console.log('[AOI BG] 保存结果:', r);
+        sendResponse(r);
+      }).catch(e => {
+        console.error('[AOI BG] 保存失败:', e);
+        try { sendResponse({ ok: false, msg: e.message }); } catch {}
       });
-    }).catch(e => sendResponse({ ok: false, err: e.message }));
-    return true;
-  }
-  if (msg.type === 'EXPORT_TXT') {
-    dbGet(msg.poiid).then(a => {
-      if (!a) { sendResponse({ ok: false, err: '未找到' }); return; }
-      const text = buildTextExport(a);
-      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      chrome.downloads.download({ url, filename: `${a.name || 'unnamed'}.txt`, saveAs: true });
-      sendResponse({ ok: true });
-    }).catch(e => sendResponse({ ok: false, err: e.message }));
-    return true;
+      return true;
+    }
+    if (msg.type === 'GET_COUNT') {
+      dbCount().then(n => sendResponse({ ok: true, count: n }))
+        .catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
+      return true;
+    }
+    if (msg.type === 'GET_ALL') {
+      dbGetAll().then(list => sendResponse({ ok: true, data: list }))
+        .catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
+      return true;
+    }
+    if (msg.type === 'DELETE_AOI') {
+      dbDelete(msg.poiid).then(() => sendResponse({ ok: true }))
+        .catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
+      return true;
+    }
+    if (msg.type === 'EXPORT_GEOJSON') {
+      dbGetAll().then(list => {
+        const geojson = buildGeoJSON(list);
+        const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        chrome.downloads.download({ url, filename: `aoi_${Date.now()}.geojson`, saveAs: true });
+        sendResponse({ ok: true });
+      }).catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
+      return true;
+    }
+    if (msg.type === 'EXPORT_SQLITE') {
+      dbGetAll().then(list => {
+        exportAsSQLite(list).then(blob => {
+          const url = URL.createObjectURL(blob);
+          chrome.downloads.download({ url, filename: `aoi_${Date.now()}.db`, saveAs: true });
+          sendResponse({ ok: true });
+        });
+      }).catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
+      return true;
+    }
+  } catch(e) {
+    console.error('[AOI BG] 消息处理异常:', e);
+    try { sendResponse({ ok: false, msg: e.message }); } catch {}
   }
 });
 
@@ -297,8 +302,16 @@ async function exportAsSQLite(aois) {
   return new Blob([lines.join('\n')], { type: 'text/sql;charset=utf-8 });
 }
 
-// 扩展安装时初始化数据库
+// 扩展安装时初始化数据库 + 保活定时器
 chrome.runtime.onInstalled.addListener(() => {
   openDB();
+  // 每25秒触发一次 alarm 保持 Service Worker 存活
+  chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
   console.log('[AOI采集] 扩展已安装，数据库就绪');
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'keepalive') {
+    // 仅保活，不做任何操作
+  }
 });
