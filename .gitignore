@@ -7,5 +7,5 @@ __pycache__/
 # 受控浏览器配置(若生成于本目录)
 .gaode_profile/
 
-# 本地预览缓存
-preview.html
+# 本地预览缓存(根目录)
+/preview.html

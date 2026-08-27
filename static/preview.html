@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>AOI预览与管理</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+html,body{height:100%;margin:0;font-family:Microsoft YaHei,sans-serif;}
+#app{display:flex;height:100%;flex-direction:column;}
+#nav{background:#1677ff;color:#fff;display:flex;align-items:center;gap:14px;padding:8px 16px;}
+#nav b{font-size:15px;}
+#nav a{color:#fff;font-size:13px;text-decoration:none;background:rgba(255,255,255,.18);
+       padding:4px 12px;border-radius:4px;cursor:pointer;}
+#nav a:hover{background:rgba(255,255,255,.32);}
+#main{flex:1;display:flex;min-height:0;}
+#map{flex:1;}
+#side{width:300px;background:#fafafa;border-left:1px solid #ddd;padding:10px;
+      box-sizing:border-box;display:flex;flex-direction:column;}
+.bar{display:flex;gap:5px;margin-bottom:7px;}
+.bar input{flex:1;border:1px solid #ccc;border-radius:4px;padding:5px 8px;font-size:13px;}
+.btn{background:#1677ff;color:#fff;border:none;border-radius:4px;padding:5px 10px;
+     cursor:pointer;font-size:12px;white-space:nowrap;}
+.btn.gray{background:#888;}
+.tip{color:#aaa;font-size:12px;margin:4px 0 8px;}
+#list{flex:1;overflow-y:auto;}
+.item{background:#fff;border:2px solid transparent;border-radius:6px;padding:6px 9px;
+      margin-bottom:6px;font-size:13px;user-select:none;}
+.item:hover{border-color:#91caff;}
+.item.sel{background:#e6f4ff;border-color:#1677ff;}
+.item .hd{display:flex;align-items:center;gap:5px;}
+.item .nm{flex:1;cursor:pointer;font-weight:bold;}
+.item small{color:#888;display:block;margin-top:2px;}
+.act{background:#e6f4ff;color:#1677ff;border:none;border-radius:4px;padding:2px 7px;
+     cursor:pointer;font-size:11px;}
+.act.del{background:#fdecec;color:#e64c3c;font-size:13px;padding:0 6px;}
+.empty{color:#bbb;text-align:center;padding:30px 0;}
+#mask{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;
+       align-items:center;justify-content:center;z-index:99999;}
+#modal{background:#fff;border-radius:10px;width:520px;max-width:92vw;max-height:82vh;
+       overflow-y:auto;padding:22px 26px;}
+#modal h3{margin:0 0 12px;color:#1677ff;}
+#modal pre{white-space:pre-wrap;word-break:break-all;background:#f6f8fa;border-radius:6px;
+           padding:12px;font-size:12px;line-height:1.8;}
+#modal .x{float:right;background:none;border:none;font-size:20px;cursor:pointer;color:#888;}
+</style></head>
+<body><div id="app">
+  <div id="nav"><b> AOI预览与管理</b>
+    <a href="/"> 控制台主页</a>
+    <a id="btnCollect">➕ 返回收集模式</a>
+  </div>
+  <div id="main">
+    <div id="map"></div>
+    <div id="side">
+      <div class="bar"><input id="kw" placeholder="搜索名称/地址/POIID"><button class="btn" id="btnSearch">搜索</button></div>
+      <div class="bar">
+        <button class="btn gray" id="btnShowAll">全选显示</button>
+        <button class="btn gray" id="btnHideAll">全选隐藏</button>
+      </div>
+      <div class="tip" id="listTip">加载中...</div>
+      <div id="list"></div>
+    </div>
+  </div>
+</div>
+<div id="mask"><div id="modal">
+  <button class="x" id="btnCloseModal">×</button>
+  <h3 id="mTitle"></h3>
+  <pre id="mBody"></pre>
+</div></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+var map = L.map('map').setView([30.3151, 120.058], 18);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19}).addTo(map);
+var AOIS = [], layers = {}, group = L.featureGroup().addTo(map);
+var listEl = document.getElementById('list');
+
+function load(){
+  fetch('/api/list').then(function(r){return r.json();}).then(function(d){
+    AOIS = d; render(); fitCenter();
+  });
+}
+function fitCenter(){
+  if(!AOIS.length) return;
+  var lats=[], lngs=[];
+  AOIS.forEach(function(a){
+    a.coords.split(';').forEach(function(s){
+      var t=s.split(','); lngs.push(+t[0]); lats.push(+t[1]);
+    });
+  });
+  map.setView([(Math.min.apply(null,lats)+Math.max.apply(null,lats))/2,
+               (Math.min.apply(null,lngs)+Math.max.apply(null,lngs))/2], 15);
+}
+function parsePts(coords){
+  return coords.split(';').map(function(s){var t=s.split(',');return [+t[0],+t[1]];});
+}
+function matched(){
+  var kw = document.getElementById('kw').value.trim();
+  return AOIS.filter(function(a){
+    return !kw || a.name.indexOf(kw)>=0 || (a.address||'').indexOf(kw)>=0 || a.poiid.indexOf(kw)>=0;
+  });
+}
+function render(){
+  var kw = document.getElementById('kw').value.trim();
+  var f = matched();
+  document.getElementById('listTip').textContent = '共 '+AOIS.length+' 个 · 点击条目上图/隐藏 · ℹ详情 · ✕删除';
+  listEl.innerHTML = '';
+  if(!f.length){
+    listEl.innerHTML = '<div class="empty">'+(kw?'无匹配结果':'暂无数据，请先采集')+'</div>';
+    return;
+  }
+  f.forEach(function(a){
+    var d = document.createElement('div');
+    d.className = 'item' + (layers[a.poiid] ? ' sel' : '');
+    d.dataset.pid = a.poiid;
+    d.innerHTML = '<div class="hd"><span class="nm">'+a.name+'</span>'
+      + '<button class="act" title="查看详情">ℹ 详情</button>'
+      + '<button class="act del" title="删除">✕</button></div>'
+      + '<small>'+a.poiid+' · '+a.point_count+'点 · '+a.city+'</small>';
+    d.addEventListener('click', function(){ toggleShow(a); });
+    var acts = d.querySelectorAll('.act');
+    acts[0].addEventListener('click', function(ev){ ev.stopPropagation(); showModal(a); });
+    acts[1].addEventListener('click', function(ev){
+      ev.stopPropagation();
+      if(confirm('确认删除「'+a.name+'」？将同时删除磁盘文件夹与数据库记录'))
+        fetch('/api/delete?poiid='+encodeURIComponent(a.poiid)).then(function(){ hideLayer(a); load(); });
+    });
+    listEl.appendChild(d);
+  });
+}
+function showModal(a){
+  var pts = parsePts(a.coords);
+  var xs = pts.map(function(p){return p[0];}), ys = pts.map(function(p){return p[1];});
+  var cx = xs.reduce(function(s,v){return s+v;},0)/pts.length;
+  var cy = ys.reduce(function(s,v){return s+v;},0)/pts.length;
+  var off = Math.round(Math.hypot(cx-a.lng, cy-a.lat)*111000);
+  document.getElementById('mTitle').textContent = a.name;
+  document.getElementById('mBody').textContent =
+    '名称: '+a.name+' | POIID: '+a.poiid+'\n'
+    +'地址: '+(a.address||'')+'\n'
+    +'中心经纬度(WGS-84): '+a.lng.toFixed(6)+', '+a.lat.toFixed(6)+'\n'
+    +'面范围: 经度 '+Math.min.apply(null,xs).toFixed(6)+' ~ '+Math.max.apply(null,xs).toFixed(6)
+    +' | 纬度 '+Math.min.apply(null,ys).toFixed(6)+' ~ '+Math.max.apply(null,ys).toFixed(6)+'\n'
+    +'边界点数: '+a.point_count+'\n'
+    +(off>800?'⚠ 面心与基准点偏差约'+off+'米，疑为高德源数据错位，建议删除！\n':'')
+    +'\n边界坐标串(lng,lat):\n'+a.coords;
+  document.getElementById('mask').style.display = 'flex';
+}
+function closeModal(){ document.getElementById('mask').style.display = 'none'; }
+document.getElementById('btnCloseModal').onclick = closeModal;
+document.getElementById('mask').addEventListener('click', function(e){ if(e.target===this) closeModal(); });
+
+function doSearch(){
+  render();
+  hideAllLayers(true);
+  matched().forEach(showLayer);
+  fitAll();
+}
+document.getElementById('btnSearch').onclick = doSearch;
+document.getElementById('kw').addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
+
+function showLayer(a){
+  if(layers[a.poiid]) return;
+  var ring = parsePts(a.coords);
+  var ly = L.geoJSON({type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[ring]}},
+    {style:{color:'#1677ff',weight:2,fillOpacity:.15}}).addTo(map);
+  layers[a.poiid] = ly; group.addLayer(ly);
+  markItem(a.poiid, true);
+}
+function hideLayer(a){
+  var ly = layers[a.poiid];
+  if(ly){ map.removeLayer(ly); group.removeLayer(ly); delete layers[a.poiid]; markItem(a.poiid, false); }
+}
+function toggleShow(a){
+  if(layers[a.poiid]) hideLayer(a);
+  else{ showLayer(a); map.fitBounds(layers[a.poiid].getBounds().pad(.2)); }
+}
+function markItem(pid, on){
+  Array.from(listEl.children).forEach(function(el){
+    if(el.dataset.pid===pid) el.classList.toggle('sel', on);
+  });
+}
+function hideAllLayers(skipMarks){
+  Object.keys(layers).forEach(function(k){
+    var ly=layers[k]; map.removeLayer(ly); group.removeLayer(ly); delete layers[k];
+  });
+  if(!skipMarks) Array.from(listEl.children).forEach(function(el){ el.classList.remove('sel'); });
+}
+function showAll(){ AOIS.forEach(showLayer); fitAll(); }
+function fitAll(){ if(group.getLayers().length) map.fitBounds(group.getBounds().pad(.2)); }
+document.getElementById('btnShowAll').onclick = showAll;
+document.getElementById('btnHideAll').onclick = function(){ hideAllLayers(false); };
+
+document.getElementById('btnCollect').onclick = function(){
+  fetch('/api/collect', {method:'POST'}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok) alert('失败: '+(d.err||'未知错误'));
+  });
+};
+
+var mapEl = document.getElementById('map');
+mapEl.addEventListener('dragover', function(e){ e.preventDefault(); });
+mapEl.addEventListener('drop', function(e){
+  e.preventDefault();
+  var pid = e.dataTransfer.getData('pid');
+  var a = AOIS.find(function(x){ return x.poiid===pid; });
+  if(a){ showLayer(a); map.fitBounds(layers[a.poiid].getBounds().pad(.2)); }
+});
+load();
+</script></body></html>
