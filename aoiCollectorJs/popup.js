@@ -71,24 +71,4 @@ document.getElementById('btnExportGJ').addEventListener('click', () => {
   });
 });
 
-document.getElementById('btnExportSQL').addEventListener('click', () => {
-  fetchAll(aois => {
-    const lines = [
-      'CREATE TABLE IF NOT EXISTS aoi(',
-      '  poiid TEXT PRIMARY KEY, name TEXT, address TEXT, city TEXT,',
-      '  lng REAL, lat REAL, point_count INTEGER,',
-      '  coords TEXT, created_at TEXT);',
-      ''
-    ];
-    for (const a of aois) {
-      const coords = a.coords_wgs84.map(p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join(';');
-      const name = (a.name || '').replace(/'/g, "''");
-      const addr = (a.address || '').replace(/'/g, "''");
-      const city = (a.city || '').replace(/'/g, "''");
-      lines.push(`INSERT OR REPLACE INTO aoi VALUES('${a.poiid}','${name}','${addr}','${city}',${a.lng},${a.lat},${a.coords_wgs84.length},'${coords}','${a.created_at}');`);
-    }
-    downloadFile(lines.join('\n'), `aoi_${Date.now()}.sql`, 'text/sql;charset=utf-8');
-  });
-});
-
 load();

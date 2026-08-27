@@ -79,6 +79,28 @@
     }
   });
 
+  // ---- 触发页面自身的搜索 (填入搜索框并回车, 请求带页面风控签名) ----
+  function triggerPageSearch(name) {
+    try {
+      const input = document.getElementById('searchipt');
+      if (!input) return false;
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, name);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      for (const t of ['keydown', 'keypress', 'keyup']) {
+        input.dispatchEvent(new KeyboardEvent(t, {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
+        }));
+      }
+      console.log('[AOI采集] 已自动触发搜索:', name);
+      return true;
+    } catch(e) {
+      console.error('[AOI采集] 自动搜索失败:', e);
+      return false;
+    }
+  }
+
   // ---- 浮窗 UI ----
   function mount() {
     try {
@@ -139,11 +161,25 @@
         const entry = aoiRings[base.poiid];
         if (entry && entry.v) { submitSave(base, raw); return; }
 
-        // 无边界: 被动等待页面自身搜索结果 (60秒窗口)
+        // 无边界: 自动触发页面自身搜索 (走页面签名管线, 避免风控419), 60秒窗口内等结果
         this.textContent = '采集中...';
         saved.style.color = '#888';
-        saved.textContent = '未捕获边界：请在地图搜索框输入「' + base.name.replace(/\(.*\)$/, '') + '」回车，结果返回后自动继续';
+        const kw = base.name.replace(/\(.*\)$/, '').trim();
         pendingSave = { base, raw, until: Date.now() + 60000 };
+        if (triggerPageSearch(kw)) {
+          saved.textContent = '正在搜索「' + kw + '」获取边界...';
+        } else {
+          saved.textContent = '未捕获边界：请在搜索框搜「' + kw + '」后自动继续';
+        }
+        setTimeout(() => {
+          if (pendingSave && Date.now() >= pendingSave.until) {
+            pendingSave = null;
+            const s2 = document.getElementById('__aoiPanelSaved');
+            const b2 = document.getElementById('__aoiBtn');
+            if (s2) { s2.style.color = '#e64c3c'; s2.textContent = '获取边界超时，请稍后重试'; }
+            if (b2) b2.textContent = '采集当前AOI';
+          }
+        }, 61000);
       });
 
       // 测试连接按钮
