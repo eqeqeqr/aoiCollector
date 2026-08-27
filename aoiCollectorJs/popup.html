@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>AOI 采集工具</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 360px; max-height: 500px; font-family: Microsoft YaHei, sans-serif; font-size: 13px; }
+.header { background: #1677ff; color: #fff; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; }
+.header b { font-size: 15px; }
+.header .count { background: rgba(255,255,255,.2); padding: 2px 10px; border-radius: 12px; font-size: 12px; }
+.toolbar { padding: 10px 16px; display: flex; gap: 6px; border-bottom: 1px solid #eee; }
+.btn { background: #1677ff; color: #fff; border: none; border-radius: 4px; padding: 5px 12px; cursor: pointer; font-size: 12px; }
+.btn.gray { background: #888; }
+.btn.red { background: #e64c3c; }
+.btn:hover { opacity: .85; }
+.list { max-height: 340px; overflow-y: auto; padding: 8px 16px; }
+.item { background: #f8f9fa; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.item .info { flex: 1; min-width: 0; }
+.item .name { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .meta { color: #888; font-size: 11px; margin-top: 2px; }
+.item .del { background: none; border: none; color: #e64c3c; cursor: pointer; font-size: 16px; padding: 0 4px; }
+.empty { text-align: center; color: #bbb; padding: 40px 0; }
+.warn { color: #e64c3c; font-size: 11px; }
+</style></head>
+<body>
+  <div class="header">
+    <b>AOI 采集工具</b>
+    <span class="count" id="count">0 个</span>
+  </div>
+  <div class="toolbar">
+    <button class="btn" id="btnExportGJ">导出 GeoJSON</button>
+    <button class="btn gray" id="btnExportSQL">导出 SQL</button>
+  </div>
+  <div class="list" id="list">
+    <div class="empty">加载中...</div>
+  </div>
+  <script src="popup.js"></script>
+</body></html>
