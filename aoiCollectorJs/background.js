@@ -113,42 +113,6 @@ function gcj02towgs84(lng, lat) {
   return [lng*2 - (lng+dlng), lat*2 - (lat+dlat)];
 }
 
-// ================== GeoJSON 导出 ==================
-function buildGeoJSON(aois) {
-  return {
-    type: 'FeatureCollection',
-    features: aois.map(a => ({
-      type: 'Feature',
-      properties: {
-        NAME: a.name,
-        POIID: a.poiid,
-        ADDRESS: a.address,
-        CITY_NAME: a.city,
-        LONGITUDE: a.lng,
-        LATITUDE: a.lat
-      },
-      geometry: {
-        type: 'Polygon',
-        coordinates: [a.coords_wgs84]
-      }
-    }))
-  };
-}
-
-function buildTextExport(a) {
-  const xs = a.coords_wgs84.map(p => p[0]);
-  const ys = a.coords_wgs84.map(p => p[1]);
-  return [
-    `名称: ${a.name} | POIID: ${a.poiid}`,
-    `地址: ${a.address || ''}`,
-    `城市: ${a.city || ''}`,
-    `点数: ${a.coords_wgs84.length} (WGS-84)`,
-    `范围: 经度 ${Math.min(...xs).toFixed(6)} ~ ${Math.max(...xs).toFixed(6)} | 纬度 ${Math.min(...ys).toFixed(6)} ~ ${Math.max(...ys).toFixed(6)}`,
-    `边界坐标串(lng,lat):`,
-    a.coords_wgs84.map(p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join(';')
-  ].join('\n');
-}
-
 // ================== 消息处理 ==================
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   console.log('[AOI BG] 收到消息:', msg.type);
@@ -176,26 +140,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'DELETE_AOI') {
       dbDelete(msg.poiid).then(() => sendResponse({ ok: true }))
         .catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
-      return true;
-    }
-    if (msg.type === 'EXPORT_GEOJSON') {
-      dbGetAll().then(list => {
-        const geojson = buildGeoJSON(list);
-        const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        chrome.downloads.download({ url, filename: `aoi_${Date.now()}.geojson`, saveAs: true });
-        sendResponse({ ok: true });
-      }).catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
-      return true;
-    }
-    if (msg.type === 'EXPORT_SQLITE') {
-      dbGetAll().then(list => {
-        exportAsSQLite(list).then(blob => {
-          const url = URL.createObjectURL(blob);
-          chrome.downloads.download({ url, filename: `aoi_${Date.now()}.db`, saveAs: true });
-          sendResponse({ ok: true });
-        });
-      }).catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
       return true;
     }
   } catch(e) {
@@ -280,26 +224,6 @@ async function handleSaveAOI(data) {
   } catch {}
 
   return { ok: true, msg };
-}
-
-// ================== SQLite 导出 (简化版) ==================
-async function exportAsSQLite(aois) {
-  // 使用简化的 SQLite 文件格式 (纯 SQL 导出为 .sql 文件)
-  const lines = [
-    'CREATE TABLE IF NOT EXISTS aoi(',
-    '  poiid TEXT PRIMARY KEY, name TEXT, address TEXT, city TEXT,',
-    '  lng REAL, lat REAL, point_count INTEGER,',
-    '  coords TEXT, created_at TEXT);',
-    ''
-  ];
-  for (const a of aois) {
-    const coords = a.coords_wgs84.map(p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join(';');
-    const name = (a.name || '').replace(/'/g, "''");
-    const addr = (a.address || '').replace(/'/g, "''");
-    const city = (a.city || '').replace(/'/g, "''");
-    lines.push(`INSERT OR REPLACE INTO aoi VALUES('${a.poiid}','${name}','${addr}','${city}',${a.lng},${a.lat},${a.coords_wgs84.length},'${coords}','${a.created_at}');`);
-  }
-  return new Blob([lines.join('\n')], { type: 'text/sql;charset=utf-8' });
 }
 
 // 扩展安装时初始化数据库 + 保活定时器
