@@ -1,12 +1,14 @@
 # AOI 半自动采集工具
 
-从高德地图网页版**半自动**采集建筑物/园区的 AOI 面边界，自动完成坐标纠偏，保存为 shp / GeoJSON / SQLite 三种格式，并内置本地 Web 控制台与地图预览管理页。
+从高德地图网页版**半自动**采集建筑物/园区的 AOI 面边界，自动完成坐标纠偏，提供两种使用方式：**本地 Web 工具**（FastAPI + Selenium，输出 shp / GeoJSON / SQLite）与**Chrome 浏览器扩展**（轻量，GeoJSON 导出）。
 
 ![控制台主页](_static/images/控制台主页.png)
 ![收集模式界面](_static/images/收集模式界面.png)
 ![预览模式界面](_static/images/预览模式界面.png)
 
-## 工作原理
+## 方式一：本地 Web 工具（FastAPI）
+
+### 工作原理
 
 1. 运行工具后自动打开本地 Web 控制台（默认 `http://127.0.0.1:9224/`）；
 2. 主页点击【开始收集】→ 自动打开一个**真实浏览器窗口**（Chrome/Edge/Chromium，自动检测）打开高德地图，并向页面注入采集浮窗；
@@ -15,7 +17,7 @@
 
 所有网络请求均由你的真实浏览行为产生（浏览器风控 JS 自动签名），因此数据获取稳定可靠；遇到风控时工具只做原样提示，由你在弹出的浏览器中自行处理（如登录账号）。
 
-## 功能特性
+### 功能特性
 
 - **FastAPI 后端**：异步 API，Selenium 操作不阻塞 HTTP 响应，无 ConnectionAbortedError
 - **跨平台跨浏览器**：自动检测系统上的 Chromium 浏览器（Windows/Mac/Linux，Chrome/Edge/Chromium）
@@ -27,7 +29,7 @@
 - **预览管理页**：Leaflet 地图展示全部已采集面，支持关键词搜索、单个/全部上图隐藏、拖拽定位、删除（同步删磁盘+数据库）
 - **详情弹窗**：预览页点击列表条目，居中弹出该建筑完整档案
 
-## 部署
+### 部署
 
 ```bash
 # 要求: Python 3.8+，系统已安装 Chrome/Edge/Chromium 其中之一
@@ -37,22 +39,7 @@ python app.py
 
 启动后自动打开控制台主页。本目录完全自包含（内置坐标转换算法，无外部服务依赖），整体拷贝到任意机器即可使用。
 
-## 项目结构
-
-```
-aoiCollector/
-├── app.py              # FastAPI 入口 (API + 静态文件)
-├── browser.py          # Selenium 浏览器控制器 (跨平台自动探测)
-├── static/
-│   ├── index.html      # 控制台主页
-│   ├── preview.html    # 预览/管理页
-│   └── collect.js      # 注入高德页面的采集钩子+浮窗
-├── collectAoiTool.py   # 旧版单文件 (保留备份)
-├── requirements.txt    # 依赖: fastapi, uvicorn, selenium, pyshp
-└── output/             # 采集结果目录
-```
-
-## 使用说明
+### 使用说明
 
 | 页面 | 操作 |
 |------|------|
@@ -60,7 +47,7 @@ aoiCollector/
 | **收集页面** | 在高德地图上点击建筑 → 浮窗出现"已捕获: xxx" → 点【采集当前AOI】保存；浮窗右上角有"打开预览模式"快捷链接 |
 | **预览页** `/preview` | 搜索定位；条目上「上图」控制显示、「ℹ 详情」弹出完整档案、「✕」删除；支持全选显示/隐藏、拖拽条目到地图快速定位 |
 
-## 采集结果结构
+### 采集结果结构
 
 ```
 output/
@@ -74,6 +61,55 @@ output/
 ```
 
 同时写入 `aoi.sqlite`（字段：名称、POIID、地址、城市、经纬度、范围、点数、坐标串、文件夹路径、采集时间）。
+
+## 方式二：Chrome 浏览器扩展
+
+免部署、免 Python 环境，适合轻量采集。
+
+### 安装
+
+1. 打开 `chrome://extensions/`，右上角开启**开发者模式**；
+2. 点【加载已解压的扩展程序】，选择本项目的 `aoiCollectorJs/` 目录；
+3. 打开 https://map.gaode.com ，右上角出现"AOI采集工具"浮窗即安装成功。
+   **注意：每次修改扩展代码或点刷新 ♻️ 后，已打开的高德页面需 F5 刷新才会重新注入。**
+
+### 使用
+
+1. 在地图上**点击任意建筑** → 浮窗显示"已捕获: xxx"；
+2. 点【采集当前AOI】→ 若尚未捕获边界，扩展会**自动在搜索框执行一次搜索**（走页面自身签名管线，不触发风控），拿到边界后自动保存；
+3. 点扩展图标打开 popup：查看已采集列表、删除单条、**导出 GeoJSON**；
+4. 点 popup 中的【预览】或把导出的 `.geojson` 文件拖入 [ky-gis 在线编辑器](https://ky-gis.com/zh/geojson-editor) 即可在地图上预览。
+
+### 数据存储说明
+
+扩展数据保存在浏览器 **IndexedDB** 中：关闭浏览器数据仍在，但**删除扩展会连同数据一起删除**，且扩展数据不属于 Chrome 同步范围。请及时导出 GeoJSON 备份。
+
+### 技术要点（MV3）
+
+- **双 content_scripts**：`hook.js` 以 `"world": "MAIN"` 注入页面主环境拦截 fetch/XHR（隔离环境拦截不到页面请求）；`content.js` 在隔离环境负责浮窗 UI 与扩展消息通信，两者通过 `postMessage` 桥接；
+- **纯被动捕获 + 自动搜索**：不手动补发 API 请求（无风控签名必被 419 拦截），而是自动驱动页面自己的搜索框（原生 setter + 派发 input/Enter 事件）；
+- **Service Worker 生命周期**：所有消息处理带 try-catch 与 `return true`；导出下载在 popup 上下文执行（SW 无 `URL.createObjectURL`）。
+
+## 项目结构
+
+```
+aoiCollector/
+├── app.py              # FastAPI 入口 (API + 静态文件)
+├── browser.py          # Selenium 浏览器控制器 (跨平台自动探测)
+├── static/
+│   ├── index.html      # 控制台主页
+│   ├── preview.html    # 预览/管理页
+│   └── collect.js      # 注入高德页面的采集钩子+浮窗
+├── aoiCollectorJs/     # Chrome 扩展 (MV3)
+│   ├── manifest.json   # 扩展清单 (双 content_scripts: MAIN + ISOLATED)
+│   ├── background.js   # Service Worker (IndexedDB 存储 + 保存逻辑)
+│   ├── hook.js         # MAIN world fetch/XHR 拦截
+│   ├── content.js      # 隔离环境浮窗 UI + 自动搜索
+│   ├── popup.html/js   # 扩展弹窗 (列表/删除/GeoJSON导出/在线预览入口)
+│   └── libs/coord.js   # GCJ-02 → WGS-84 坐标转换
+├── requirements.txt    # 依赖: fastapi, uvicorn, selenium, pyshp
+└── output/             # 采集结果目录 (Web 工具方式)
+```
 
 ## 注意事项
 
