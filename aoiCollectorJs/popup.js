@@ -71,4 +71,9 @@ document.getElementById('btnExportGJ').addEventListener('click', () => {
   });
 });
 
+// 预览: 打开在线 GeoJSON 编辑器, 用户导入导出的文件即可预览
+document.getElementById('btnPreview').addEventListener('click', () => {
+  chrome.tabs.create({ url: 'https://ky-gis.com/zh/geojson-editor' });
+});
+
 load();
