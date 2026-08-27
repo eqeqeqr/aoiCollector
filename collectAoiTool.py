@@ -20,7 +20,6 @@ import sqlite3
 import threading
 import subprocess
 import tempfile
-import webbrowser
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs, unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -91,8 +90,10 @@ def hook_js():
 if(!window.__aoiHooked){
 window.__aoiHooked=1;
 window.__aoiLast=null;
+// 搜索接口自带每POI的AOI环(domain_list[aoi].value)，作为mining_shape脏数据时的备用修复源
+window.__aoiRings={};
 (function(){
-  function note(t){
+  function detailNote(t){
     try{
       var d=JSON.parse(t);
       if(d && d.status==='1' && d.data && d.data.base){
@@ -105,16 +106,69 @@ window.__aoiLast=null;
       }
     }catch(e){}
   }
+  function searchNote(t){
+    try{
+      var d=JSON.parse(t);
+      var pl=(d && d.data && d.data.poi_list)||[];
+      for(var i=0;i<pl.length;i++){
+        var pp=pl[i], dl=pp.domain_list||[];
+        for(var k=0;k<dl.length;k++){
+          if(dl[k].name==='aoi' && dl[k].value && dl[k].value.indexOf('_')>0 && pp.id){
+            window.__aoiRings[pp.id]={v:dl[k].value,
+              x:pp.longitude,y:pp.latitude,
+              a:pp.address||'',c:pp.cityname||''};
+          }
+        }
+      }
+    }catch(e){}
+  }
+  function route(url,t){
+    try{
+      url=String(url);
+      if(url.indexOf('/detail/get/detail')>=0){detailNote(t);}
+      else if(url.indexOf('poiInfo')>=0){searchNote(t);}
+    }catch(e){}
+  }
+  // 手动触发一次搜索(点建筑采集时自动调用,补齐该POI的搜索环)
+  window.__aoiFetchRing=function(kw,pid,cb){
+    var url='/service/poiInfo?query_type=TQUERY&pagesize=20&pagenum=1&qii=true&cluster_state=5'
+      +'&need_utd=true&utd_sceneid=1000&div=PC1000&addr_poi_merge=true&is_classify=true'
+     +'&zoom=17&keywords='+encodeURIComponent(kw);
+    fetch(url).then(function(r){return r.text()})
+      .then(function(t){
+        try{
+          var j=JSON.parse(t);
+          var pl=(j.data&&j.data.poi_list)||[];
+          for(var i=0;i<pl.length;i++){
+            if(pl[i].id===pid){
+              var dl=pl[i].domain_list||[];
+              for(var k=0;k<dl.length;k++){
+                if(dl[k].name==='aoi'&&dl[k].value&&dl[k].value.indexOf('_')>0){
+                  window.__aoiRings[pid]={v:dl[k].value,
+                    x:pl[i].longitude,y:pl[i].latitude,
+                    a:pl[i].address||'',c:pl[i].cityname||''};
+                  cb(true);return;
+                }
+              }
+            }
+          }
+          cb(false);
+        }catch(e){cb(false);}
+      }).catch(function(){cb(false);});
+  };
   var of=window.fetch;
   window.fetch=function(u){
     var p=of.apply(this,arguments);
-    try{ if(String(u).indexOf('/detail/get/detail')>=0){ p.then(function(r){return r.text()}).then(note); } }catch(e){}
+    try{
+      // clone后读取,避免抢占页面自身的响应体流
+      p.clone().text().then(function(t){route(u,t)}).catch(function(){});
+    }catch(e){}
     return p;
   };
   var oo=XMLHttpRequest.prototype.open, os_=XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open=function(m,u){this.__u=String(u);return oo.apply(this,arguments)};
   XMLHttpRequest.prototype.send=function(){
-    this.addEventListener('load',function(){ if(this.__u&&this.__u.indexOf('/detail/get/detail')>=0){note(this.responseText);} });
+    this.addEventListener('load',function(){ if(this.__u){route(this.__u,this.responseText);} });
     return os_.apply(this,arguments);
   };
 })();
@@ -126,6 +180,8 @@ def panel_js(base, preview_url):
     return """
 (function(){
   function mount(){
+    // 单窗口模式: 同一标签页也会加载控制台/预览页, 仅在高德页面挂载浮窗
+    if(location.host.indexOf('gaode.com')<0){return;}
     if(document.getElementById('__aoiPanel')){return;}
     if(!document.body){setTimeout(mount,200);return;}
     var panel=document.createElement('div');
@@ -137,7 +193,7 @@ def panel_js(base, preview_url):
       '<div id="__aoiPanelHead" style="display:flex;align-items:center;justify-content:space-between;'
       +'margin-bottom:6px;cursor:move;">'
       +'<span style="font-weight:bold;color:#1677ff;">AOI采集工具</span>'
-      +'<a href="%s" target="_blank" style="color:#1677ff;font-size:12px;text-decoration:none;'
+      +'<a href="%s" style="color:#1677ff;font-size:12px;text-decoration:none;'
       +'cursor:pointer;">打开预览模式 →</a></div>'
       +'<div style="color:#999;font-size:11px;margin-bottom:6px;">GCJ-02将自动转为WGS-84保存</div>'
       +'<div id="__aoiPanelInfo" style="color:#555;margin-bottom:8px;min-height:18px;">等待点击建筑...</div>'
@@ -170,19 +226,32 @@ def panel_js(base, preview_url):
     document.getElementById('__aoiBtn').addEventListener('click',function(){
       var btn=this,saved=document.getElementById('__aoiPanelSaved'),
           info=document.getElementById('__aoiPanelInfo');
-      btn.textContent='采集中...';
       var raw=window.__aoiLast;
-      if(!raw){saved.textContent='未捕获到数据，请先点击建筑';btn.textContent='采集当前AOI';return;}
-      fetch('%s/api/report',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:raw})
-        .then(function(r){return r.text();})
-        .then(function(m){
-          var isWarn=m.indexOf('[警告]')===0;
-          if(!isWarn&&m.indexOf('已保存')>=0){window.__aoiLast=null;info.textContent='等待点击建筑...';}
-          saved.style.color=isWarn?'#e64c3c':'#52c41a';
-          saved.textContent=m.length>90?m.substring(0,90)+'…':m;
-          btn.textContent='采集当前AOI';
-        })
-        .catch(function(e){saved.textContent='上报失败:'+e.message;btn.textContent='采集当前AOI';});
+      if(!raw){saved.style.color='#52c41a';saved.textContent='请先点击目标建筑';return;}
+      var base={};
+      try{ base=(JSON.parse(raw).data||{}).base||{}; }catch(e){}
+      if(!base.poiid){saved.style.color='#e64c3c';saved.textContent='点击数据异常，请重新点击建筑';return;}
+      function submit(){
+        var payload=JSON.stringify({raw:raw,rings:window.__aoiRings||{}});
+        fetch('%s/api/report',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:payload})
+          .then(function(r){return r.text();})
+          .then(function(m){
+            var isWarn=m.indexOf('[警告]')===0||m.indexOf('未保存')>=0;
+            if(!isWarn&&m.indexOf('已保存')>=0){window.__aoiLast=null;info.textContent='等待点击建筑...';}
+            saved.style.color=isWarn?'#e64c3c':'#52c41a';
+            saved.textContent=m.length>90?m.substring(0,90)+'…':m;
+            btn.textContent='采集当前AOI';
+          })
+          .catch(function(e){saved.textContent='上报失败:'+e.message;btn.textContent='采集当前AOI';});
+      }
+      // 数据源:搜索接口AOI(可靠)。缓存没有就现场按名称+poiid搜一次
+      var entry=(window.__aoiRings||{})[base.poiid];
+      if(entry&&entry.v){submit();return;}
+      saved.style.color='#888';saved.textContent='正在通过搜索接口获取AOI...';
+      btn.textContent='采集中...';
+      window.__aoiFetchRing(base.name,base.poiid,function(ok){
+        submit();
+      });
     });
   }
   if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',mount);}
@@ -205,7 +274,7 @@ def kill_stale_browser():
             if pid.isdigit():
                 subprocess.run(['taskkill','/F','/PID',pid],capture_output=True)
 
-def launch_browser():
+def launch_browser(url=None):
     kill_stale_browser()
     time.sleep(1)
     edge=None
@@ -217,13 +286,18 @@ def launch_browser():
     if not edge:
         raise RuntimeError('未找到Edge浏览器，请先安装Microsoft Edge')
     profile=tempfile.gettempdir()+os.sep+'gaode_collect_profile'
-    subprocess.Popen([edge,'--remote-debugging-port=%s'%DEBUG_PORT,
-                      '--user-data-dir='+profile,
-                      '--disable-blink-features=AutomationControlled'])
+    cmd=[edge,'--remote-debugging-port=%s'%DEBUG_PORT,
+         '--user-data-dir='+profile,
+         '--disable-blink-features=AutomationControlled']
+    if url:
+        cmd.append(url)
+    subprocess.Popen(cmd)
     time.sleep(4)
     opts=Options()
     opts.add_experimental_option('debuggerAddress','127.0.0.1:%s'%DEBUG_PORT)
     return webdriver.Edge(options=opts)
+
+_home_handle={'h':None}
 
 def ensure_driver():
     with _dlock:
@@ -238,30 +312,47 @@ def ensure_driver():
             _driver['d']=launch_browser()
         return _driver['d']
 
-def _new_tab(d,preview_url):
-    d.switch_to.new_window('tab')
-    h=d.current_window_handle
-    d.get(HOME_URL)
-    js=hook_js()+panel_js(_report_base(),preview_url)
-    # 注册到本标签页: 手动刷新后仍自动挂载
-    try:
-        d.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',{'source':js})
-    except Exception:
-        pass
-    # 立即挂载(脚本自带body就绪保护)
-    d.execute_script(js)
-    return h
+def _navigate_tab(js,url):
+    """后台线程: 切换到工作标签页、注册钩子、导航到目标页面。
+       必须在后台执行——主线程同步d.get会阻塞HTTP响应导致浏览器连接中断。"""
+    with _dlock:
+        d=_driver['d']
+        if not d: return
+        if not (_home_handle['h'] and _home_handle['h'] in d.window_handles):
+            _home_handle['h']=d.window_handles[0] if d.window_handles else None
+            if not _home_handle['h']:
+                return
+        try:
+            d.switch_to.window(_home_handle['h'])
+            d.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',{'source':js})
+        except Exception:
+            pass
+        try:
+            d.get(url)
+            d.execute_script(js)
+        except Exception:
+            pass
 
 def open_collect_tab(preview_url):
-    """新开一个收集窗口(独立标签页)，并针对该标签页注册钩子+立即挂载浮窗。
-       修复点1: CDP的addScriptToEvaluateOnNewDocument仅对注册时的标签页生效，
-       因此每个新窗口都必须单独注册，否则浮窗不会显示。
-       修复点2: 用户关闭浏览器后会话死亡，ensure_driver心跳检测失败会自动重建；
-       若失效发生在操作间隙，在此捕获并重建重试一次。"""
-    try:
-        d=ensure_driver()
+    """在当前浏览器新开标签页并导航到高德地图。创建标签页+导航全部在
+       后台线程执行, 主线程立刻返回HTTP响应, 避免ConnectionAbortedError。"""
+    js=hook_js()+panel_js(_report_base(),preview_url)
+    def nav():
         with _dlock:
-            return _new_tab(d,preview_url)
+            d=_driver['d']
+            if not d: return
+            try:
+                d.switch_to.new_window('tab')
+                d.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',{'source':js})
+                d.get(HOME_URL)
+                d.execute_script(js)
+            except Exception as ex:
+                print('[open_collect] nav失败:', ex)
+    try:
+        ensure_driver()
+        t=threading.Thread(target=nav,daemon=True)
+        t.start()
+        return True
     except Exception as ex:
         if 'invalid session id' not in str(ex) and 'disconnected' not in str(ex):
             raise
@@ -272,9 +363,28 @@ def open_collect_tab(preview_url):
             except Exception:
                 pass
             _driver['d']=None
-        d=ensure_driver()
-        with _dlock:
-            return _new_tab(d,preview_url)
+        ensure_driver()
+        t=threading.Thread(target=nav,daemon=True)
+        t.start()
+        return True
+
+def start_console_browser(port):
+    """启动受控Edge并让初始页直接显示控制台主页(单窗口模式入口)"""
+    url='http://127.0.0.1:%d/'%port
+    d=launch_browser(url=url)
+    with _dlock:
+        _driver['d']=d
+        hs=d.window_handles
+        _home_handle['h']=hs[0] if hs else None
+        if not _home_handle['h']:
+            d.switch_to.new_window('tab')
+            _home_handle['h']=d.current_window_handle
+            d.get(url)
+        js=hook_js()+panel_js(_report_base(),url.rstrip('/')+'/preview')
+        try:
+            d.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',{'source':js})
+        except Exception:
+            pass
 
 # ================== 输出与简介 ==================
 def build_info_text(name,poiid,address,pts):
@@ -329,33 +439,61 @@ def write_aoi_outputs(name,poiid,address,city_name,x,y,wgs_pts):
         f.write(build_info_text(name,poiid,address,wgs_pts))
     return fdir
 
-def save_aoi(raw):
+def parse_ring(ring_str,sep):
+    """解析边界串为点列表; 搜索源首尾闭合会去掉重复的收尾点"""
+    pts=[tuple(map(float,s.split(','))) for s in ring_str.split(sep)]
+    if len(pts)>1 and pts[0]==pts[-1]:
+        pts=pts[:-1]
+    return pts
+
+def save_aoi(payload):
+    # 数据源决策:AOI几何一律取自搜索接口的环(可靠);
+    # detail响应仅用于识别用户点击了哪个建筑(poiid/名称)。
+    if payload.lstrip().startswith('{') and '"raw"' in payload:
+        obj=json.loads(payload)
+        raw=obj.get('raw','')
+        rings=obj.get('rings') or {}
+    else:
+        raw=payload
+        rings={}
     d=json.loads(raw)
     base=(d.get('data') or {}).get('base') or {}
-    spec=(d.get('data') or {}).get('spec') or {}
-    ms=spec.get('mining_shape') or {}
-    shape=ms.get('shape')
     name=base.get('name') or 'unnamed'
-    if not shape:
-        return '%s 无边界数据(mining_shape缺失)，未保存。'%name
-    x=float(base.get('x')); y=float(base.get('y'))
-    pts=[tuple(map(float,s.split(','))) for s in shape.split(';')]
+    poiid=base.get('poiid','')
+    entry=rings.get(poiid)
+    # 兼容: 缓存值可能是旧版纯字符串
+    if isinstance(entry,str):
+        entry={'v':entry}
+    if not entry or not entry.get('v'):
+        return '%s：搜索接口未返回该建筑的AOI边界(可能名称歧义)，未保存。请先在搜索框搜一次该地点再点击采集。'%name
+    try:
+        pts=parse_ring(entry['v'],'_')
+    except Exception:
+        return '%s：搜索返回的AOI边界解析失败，未保存。'%name
+    if len(pts)<3:
+        return '%s：搜索返回的AOI边界点数不足(%d)，未保存。'%(name,len(pts))
+    # 中心坐标优先用搜索接口返回值，缺失则回退detail基准点
+    try:
+        x=float(entry.get('x')); y=float(entry.get('y'))
+    except (TypeError,ValueError):
+        x=float(base.get('x')); y=float(base.get('y'))
     cx=sum(p[0] for p in pts)/len(pts); cy=sum(p[1] for p in pts)/len(pts)
     offm=math.hypot(cx-x,cy-y)*111000
     warn=''
     if offm>800:
-        warn='[警告] 边界面与POI坐标偏差%.0f米，疑为服务端脏数据，仍按你的指令保存。'%offm
+        warn='[警告] 边界面与POI坐标偏差%.0f米，请人工核实位置'%offm
+        print(warn+' -> '+name)
 
-    address=base.get('address','')
-    city_name=base.get('city_name','')
-    poiid=base.get('poiid','')
+    address=entry.get('a','')
+    city_name=entry.get('c','')
     wgs_pts=[gcj02towgs84(p[0],p[1]) for p in pts]
     fdir=write_aoi_outputs(name,poiid,address,city_name,x,y,wgs_pts)
     upsert_aoi(name,poiid,address,city_name,x,y,wgs_pts,fdir)
     if warn:
-        print(warn)
-        return warn+' %s 已保存(建议到预览页核实位置或删除)（%d个边界点）'%(name,len(pts))
-    return '%s 已保存并入库 -> %s （%d个边界点）'%(name,fdir,len(pts))
+        print('[采集] ', warn)
+        return warn+'，%s 已入库并保存至output文件夹（%d个边界点），建议到预览页核实或删除'%(name,len(pts))
+    print('[采集] %s -> %s'%(name,fdir))
+    return '%s 已入库并保存至output文件夹中（%d个边界点，来源:搜索接口）'%(name,len(pts))
 
 def safe_name(s):
     for ch in '\\/:*?"<>|':
@@ -467,7 +605,7 @@ h1{margin:0 0 6px;color:#1677ff;font-size:26px;}
   <div class="sub">在高德地图上点击建筑即可采集其区域边界<br>GCJ-02 自动转 WGS-84 · 数据落盘 shp/geojson/SQLite</div>
   <div class="stat">已采集 __COUNT__ 个 AOI</div>
   <div class="btns">
-    <button class="big b1" onclick="openCollect()">🏗️ 开始收集<br><small style="font-weight:normal;">新开高德地图窗口</small></button>
+    <button class="big b1" onclick="openCollect()">🏗️ 开始收集<br><small style="font-weight:normal;">本窗口切换到高德地图</small></button>
     <button class="big b2" onclick="location.href='/preview'">🗺️ 进入预览<br><small style="font-weight:normal;">地图查看/搜索/管理</small></button>
   </div>
   <div class="err" id="err"></div>
@@ -483,7 +621,7 @@ function openCollect(){
   e.textContent='正在新开收集窗口...';
   fetch('/api/open_collect',{method:'POST'})
     .then(r=>r.json()).then(d=>{
-      if(d.ok){e.style.color='#52c41a';e.textContent='✅ 已新开收集窗口，请切换到浏览器中的高德标签页';
+      if(d.ok){e.style.color='#52c41a';e.textContent='✅ 正在切换到收集模式...';
         setTimeout(()=>{e.textContent='';},4000);}
       else{e.style.color='#e64c3c';e.textContent='❌ '+ (d.err||'失败');}
     }).catch(ex=>{e.style.color='#e64c3c';e.textContent='❌ '+ex.message;});
@@ -529,7 +667,7 @@ html,body{height:100%;margin:0;font-family:Microsoft YaHei,sans-serif;}
 <body><div id="app">
   <div id="nav"><b>🗺️ AOI预览与管理</b>
     <a href="/">🏠 控制台主页</a>
-    <a onclick="openCollect()">➕ 新开收集窗口</a>
+    <a onclick="openCollect()">➕ 返回收集模式</a>
   </div>
   <div id="main">
     <div id="map"></div>
@@ -646,7 +784,7 @@ function showAll(){AOIS.forEach(showLayer);fitAll();}
 function fitAll(){if(group.getLayers().length){map.fitBounds(group.getBounds().pad(.2));}}
 function openCollect(){
   fetch('/api/open_collect',{method:'POST'}).then(r=>r.json()).then(d=>{
-    if(d.ok){alert('已新开收集窗口，请切换到浏览器的高德标签页');}
+    if(d.ok){/* 本窗口即将切换到高德地图 */}
     else{alert('失败: '+(d.err||'未知错误'));}
   });
 }
@@ -784,9 +922,10 @@ def main():
     print(' AOI 半自动采集工具（独立版 · Web控制台）')
     print(' 服务地址: %s'%url)
     print(' 数据目录: %s'%OUTPUT_DIR)
+    print(' 单窗口模式: 控制台/收集/预览都在同一浏览器窗口切换')
     print(' 按 Ctrl+C 退出(将同时关闭受控浏览器)')
     print('='*56)
-    webbrowser.open(url)
+    start_console_browser(port)
     try:
         while True:
             time.sleep(3600)
