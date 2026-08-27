@@ -20,32 +20,32 @@ def _find_browser():
     candidates = []
     if system == 'Windows':
         candidates = [
-            shutil.which('msedge'),
-            r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-            r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
             shutil.which('chrome'),
             r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
             r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+            shutil.which('msedge'),
+            r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+            r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
         ]
     elif system == 'Darwin':  # macOS
         candidates = [
-            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
             '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-            shutil.which('microsoft-edge'),
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
             shutil.which('google-chrome'),
+            shutil.which('microsoft-edge'),
         ]
     else:  # Linux
         candidates = [
-            shutil.which('microsoft-edge-stable'),
-            shutil.which('microsoft-edge'),
             shutil.which('google-chrome-stable'),
             shutil.which('google-chrome'),
             shutil.which('chromium-browser'),
             shutil.which('chromium'),
-            '/usr/bin/microsoft-edge-stable',
+            shutil.which('microsoft-edge-stable'),
+            shutil.which('microsoft-edge'),
             '/usr/bin/google-chrome-stable',
             '/usr/bin/chromium-browser',
             '/usr/bin/chromium',
+            '/usr/bin/microsoft-edge-stable',
         ]
     for p in candidates:
         if p and os.path.exists(p):
@@ -87,17 +87,19 @@ class BrowserController:
 
     # ---------- 生命周期 ----------
 
-    def launch(self):
-        """启动受控浏览器并连接 Selenium"""
+    def launch(self, console_url=None):
+        """启动受控浏览器并连接 Selenium。console_url 不为空时直接打开控制台。"""
         _kill_stale()
         time.sleep(1)
         browser_path = _find_browser()
-        is_edge = 'Edge' in browser_path
+        is_edge = 'edge' in browser_path.lower()
         profile = os.path.join(tempfile.gettempdir(), 'gaode_collect_profile')
         cmd = [browser_path,
                '--remote-debugging-port=%s' % DEBUG_PORT,
                '--user-data-dir=' + profile,
                '--disable-blink-features=AutomationControlled']
+        if console_url:
+            cmd.append(console_url)
         subprocess.Popen(cmd)
         time.sleep(4)
         opts = (EdgeOptions() if is_edge else ChromeOptions())
@@ -112,13 +114,12 @@ class BrowserController:
             if self._d is not None:
                 try:
                     self._d.window_handles
-                    # 浏览器活着——检查是否在控制台页面
                     if console_url and console_url not in self._d.current_url:
                         self._d.get(console_url)
                     return self._d
                 except Exception:
                     self._d = None
-            self.launch()
+            self.launch(console_url)
             return self._d
 
     def quit(self):

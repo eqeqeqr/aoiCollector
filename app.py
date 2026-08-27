@@ -12,8 +12,24 @@ import shapefile
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from browser import BrowserController
+
+# ================== CORS + Private Network 中间件 ==================
+class CORSMiddleware(BaseHTTPMiddleware):
+    """处理跨域请求，特别是 Chrome Private Network Access 预检"""
+    async def dispatch(self, request, call_next):
+        if request.method == 'OPTIONS':
+            from starlette.responses import Response
+            resp = Response(status_code=204)
+        else:
+            resp = await call_next(request)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        resp.headers['Access-Control-Allow-Private-Network'] = 'true'
+        return resp
 
 # ================== 配置 ==================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -96,10 +112,8 @@ def write_geojson(fp_base, name, poiid, address, city_name, x, y, pts):
 def write_aoi_outputs(name, poiid, address, city_name, x, y, wgs_pts):
     fn = safe_name(name)
     fdir = os.path.join(OUTPUT_DIR, fn)
-    n = 1
-    while os.path.exists(fdir):
-        n += 1
-        fdir = os.path.join(OUTPUT_DIR, '%s_%d' % (fn, n))
+    if os.path.exists(fdir):
+        shutil.rmtree(fdir)
     os.makedirs(fdir)
     fp_base = os.path.join(fdir, fn)
 
@@ -254,23 +268,30 @@ def _build_inject_js(base_url):
     return js
 
 # ================== FastAPI ==================
+# ================== FastAPI ==================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     init_db()
     convert_loose_shps()
-    # 启动浏览器
+    console_url = 'http://%s:%d/' % (HOST, PORT)
     try:
-        browser.launch()
-        print('[启动] 浏览器已连接')
+        await asyncio.to_thread(browser.launch, console_url)
+        print('[启动] 浏览器已连接，控制台: %s' % console_url)
     except Exception as ex:
-        print('[启动] 浏览器连接失败: %s — 请确认 Edge 已安装' % ex)
+        print('[启动] 浏览器连接失败: %s' % ex)
     yield
     browser.quit()
     print('[退出] 浏览器已关闭')
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(CORSMiddleware)
 app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
+
+@app.get('/favicon.ico', include_in_schema=False)
+async def favicon():
+    from starlette.responses import Response
+    return Response(status_code=204)
 
 @app.get('/', response_class=HTMLResponse)
 async def home():
@@ -286,17 +307,17 @@ async def preview():
 async def api_collect():
     """新开标签页打开高德地图 — Selenium 操作放线程池，不阻塞响应"""
     base_url = 'http://%s:%d' % (HOST, PORT)
+    console_url = base_url + '/'
     js = _build_inject_js(base_url)
     try:
-        await asyncio.to_thread(browser.open_collect_tab, js)
+        await asyncio.to_thread(browser.open_collect_tab, js, console_url)
         return {'ok': True}
     except Exception as ex:
-        # 浏览器会话可能已死，尝试恢复
         err = str(ex)
         if 'invalid session' in err or 'disconnected' in err:
             try:
-                await asyncio.to_thread(browser.ensure_driver)
-                await asyncio.to_thread(browser.open_collect_tab, js)
+                await asyncio.to_thread(browser.ensure_driver, console_url)
+                await asyncio.to_thread(browser.open_collect_tab, js, console_url)
                 return {'ok': True}
             except Exception as ex2:
                 return {'ok': False, 'err': str(ex2)[:120]}
