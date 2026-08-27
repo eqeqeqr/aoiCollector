@@ -134,15 +134,39 @@ def panel_js(base, preview_url):
       +'border:2px solid #1677ff;border-radius:8px;padding:10px 14px;font-size:13px;'
       +'font-family:Microsoft YaHei,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.25);width:230px;';
     panel.innerHTML=
-      '<div style="font-weight:bold;color:#1677ff;margin-bottom:6px;">AOI采集工具</div>'
+      '<div id="__aoiPanelHead" style="display:flex;align-items:center;justify-content:space-between;'
+      +'margin-bottom:6px;cursor:move;">'
+      +'<span style="font-weight:bold;color:#1677ff;">AOI采集工具</span>'
+      +'<a href="%s" target="_blank" style="color:#1677ff;font-size:12px;text-decoration:none;'
+      +'cursor:pointer;">打开预览模式 →</a></div>'
       +'<div style="color:#999;font-size:11px;margin-bottom:6px;">GCJ-02将自动转为WGS-84保存</div>'
       +'<div id="__aoiPanelInfo" style="color:#555;margin-bottom:8px;min-height:18px;">等待点击建筑...</div>'
       +'<div id="__aoiPanelSaved" style="color:#52c41a;margin-bottom:8px;min-height:16px;"></div>'
       +'<button id="__aoiBtn" style="background:#1677ff;color:#fff;border:none;border-radius:4px;'
-      +'padding:6px 14px;cursor:pointer;font-size:13px;">采集当前AOI</button>'
-      +'<a href="%s" target="_blank" style="display:block;margin-top:8px;color:#1677ff;'
-      +'font-size:12px;text-decoration:none;">打开预览模式 →</a>';
+      +'padding:6px 14px;cursor:pointer;font-size:13px;">采集当前AOI</button>';
     document.body.appendChild(panel);
+    // 自由拖动(按住面板非按钮/链接区域即可拖)
+    panel.addEventListener('mousedown',function(e){
+      var t=e.target;
+      if(t.tagName==='BUTTON'||t.tagName==='A'||t.closest('button,a')){return;}
+      var rect=panel.getBoundingClientRect();
+      var sx=e.clientX,sy=e.clientY,ol=rect.left,ot=rect.top,moved=false;
+      function mv(ev){
+        moved=true;
+        var nl=ol+ev.clientX-sx, nt=ot+ev.clientY-sy;
+        nl=Math.max(0,Math.min(window.innerWidth-panel.offsetWidth,nl));
+        nt=Math.max(0,Math.min(window.innerHeight-panel.offsetHeight,nt));
+        panel.style.left=nl+'px';panel.style.top=nt+'px';panel.style.right='auto';
+        ev.preventDefault();
+      }
+      function up(){
+        document.removeEventListener('mousemove',mv);
+        document.removeEventListener('mouseup',up);
+      }
+      document.addEventListener('mousemove',mv);
+      document.addEventListener('mouseup',up);
+      e.preventDefault();
+    });
     document.getElementById('__aoiBtn').addEventListener('click',function(){
       var btn=this,saved=document.getElementById('__aoiPanelSaved'),
           info=document.getElementById('__aoiPanelInfo');
@@ -152,8 +176,10 @@ def panel_js(base, preview_url):
       fetch('%s/api/report',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:raw})
         .then(function(r){return r.text();})
         .then(function(m){
-          if(m.indexOf('已保存')>=0){window.__aoiLast=null;info.textContent='等待点击建筑...';}
-          saved.textContent=m.length>44?m.substring(0,44)+'…':m;
+          var isWarn=m.indexOf('[警告]')===0;
+          if(!isWarn&&m.indexOf('已保存')>=0){window.__aoiLast=null;info.textContent='等待点击建筑...';}
+          saved.style.color=isWarn?'#e64c3c':'#52c41a';
+          saved.textContent=m.length>90?m.substring(0,90)+'…':m;
           btn.textContent='采集当前AOI';
         })
         .catch(function(e){saved.textContent='上报失败:'+e.message;btn.textContent='采集当前AOI';});
@@ -167,7 +193,21 @@ def panel_js(base, preview_url):
 _driver={'d':None}
 _dlock=threading.RLock()
 
+def kill_stale_browser():
+    """清理上次残留的受控浏览器进程(仅限本工具专用profile，不影响日常Edge)"""
+    out=subprocess.run(['wmic','process','where',"name='msedge.exe'",'get','ProcessId,CommandLine'],
+                       capture_output=True,text=True) if os.name=='nt' else None
+    if not out or not out.stdout:
+        return
+    for line in out.stdout.splitlines():
+        if ('gaode_collect_profile' in line) or (('--remote-debugging-port=%s'%DEBUG_PORT) in line):
+            pid=line.strip().split()[-1]
+            if pid.isdigit():
+                subprocess.run(['taskkill','/F','/PID',pid],capture_output=True)
+
 def launch_browser():
+    kill_stale_browser()
+    time.sleep(1)
     edge=None
     for p in [shutil.which('msedge'),
               r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
@@ -187,28 +227,54 @@ def launch_browser():
 
 def ensure_driver():
     with _dlock:
-        if _driver['d'] is None:
+        d=_driver['d']
+        if d is not None:
+            try:
+                d.window_handles   # 心跳探测: 会话已死则抛异常
+            except Exception:
+                _driver['d']=None
+                d=None
+        if d is None:
             _driver['d']=launch_browser()
         return _driver['d']
 
+def _new_tab(d,preview_url):
+    d.switch_to.new_window('tab')
+    h=d.current_window_handle
+    d.get(HOME_URL)
+    js=hook_js()+panel_js(_report_base(),preview_url)
+    # 注册到本标签页: 手动刷新后仍自动挂载
+    try:
+        d.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',{'source':js})
+    except Exception:
+        pass
+    # 立即挂载(脚本自带body就绪保护)
+    d.execute_script(js)
+    return h
+
 def open_collect_tab(preview_url):
     """新开一个收集窗口(独立标签页)，并针对该标签页注册钩子+立即挂载浮窗。
-       修复点: CDP的addScriptToEvaluateOnNewDocument仅对注册时的标签页生效，
-       因此每个新窗口都必须单独注册，否则浮窗不会显示。"""
-    d=ensure_driver()
-    with _dlock:
-        d.switch_to.new_window('tab')
-        h=d.current_window_handle
-        d.get(HOME_URL)
-        js=hook_js()+panel_js(_report_base(),preview_url)
-        # 注册到本标签页: 手动刷新后仍自动挂载
-        try:
-            d.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',{'source':js})
-        except Exception:
-            pass
-        # 立即挂载(脚本自带body就绪保护)
-        d.execute_script(js)
-    return h
+       修复点1: CDP的addScriptToEvaluateOnNewDocument仅对注册时的标签页生效，
+       因此每个新窗口都必须单独注册，否则浮窗不会显示。
+       修复点2: 用户关闭浏览器后会话死亡，ensure_driver心跳检测失败会自动重建；
+       若失效发生在操作间隙，在此捕获并重建重试一次。"""
+    try:
+        d=ensure_driver()
+        with _dlock:
+            return _new_tab(d,preview_url)
+    except Exception as ex:
+        if 'invalid session id' not in str(ex) and 'disconnected' not in str(ex):
+            raise
+        print('[恢复] 检测到浏览器会话已关闭，正在重新拉起浏览器...')
+        with _dlock:
+            try:
+                _driver['d'].quit()
+            except Exception:
+                pass
+            _driver['d']=None
+        d=ensure_driver()
+        with _dlock:
+            return _new_tab(d,preview_url)
 
 # ================== 输出与简介 ==================
 def build_info_text(name,poiid,address,pts):
@@ -288,6 +354,7 @@ def save_aoi(raw):
     upsert_aoi(name,poiid,address,city_name,x,y,wgs_pts,fdir)
     if warn:
         print(warn)
+        return warn+' %s 已保存(建议到预览页核实位置或删除)（%d个边界点）'%(name,len(pts))
     return '%s 已保存并入库 -> %s （%d个边界点）'%(name,fdir,len(pts))
 
 def safe_name(s):
@@ -472,7 +539,7 @@ html,body{height:100%;margin:0;font-family:Microsoft YaHei,sans-serif;}
         <button class="btn gray" onclick="showAll()">全选显示</button>
         <button class="btn gray" onclick="hideAllLayers(false)">全选隐藏</button>
       </div>
-      <div class="tip">共 __COUNT__ 个 · 点名称看详情 · 「上图」蓝框显示 · ✕删除</div>
+      <div class="tip">共 __COUNT__ 个 · 点击条目上图/隐藏 · 「ℹ详情」看档案 · ✕删除</div>
       <div id="list"></div>
     </div>
   </div>
@@ -504,16 +571,14 @@ function render(){
     d.className='item'+(layers[a.poiid]?' sel':'');
     d.dataset.pid=a.poiid;
     d.innerHTML='<div class="hd"><span class="nm">'+a.name+'</span>'
-      +'<button class="act" title="在地图显示/隐藏">上图</button>'
       +'<button class="act" title="查看详情">ℹ 详情</button>'
       +'<button class="act del" title="删除">✕</button></div>'
       +'<small>'+a.poiid+' · '+a.point_count+'点 · '+a.city+'</small>';
-    // 点击条目主体 -> 居中弹窗详情
-    d.addEventListener('click',function(){showModal(a);});
+    // 点击条目任意位置 -> 上图/隐藏并定位到该面
+    d.addEventListener('click',function(){toggleShow(a);});
     var acts=d.querySelectorAll('.act');
-    acts[0].addEventListener('click',function(ev){ev.stopPropagation();toggleShow(a);});
-    acts[1].addEventListener('click',function(ev){ev.stopPropagation();showModal(a);});
-    acts[2].addEventListener('click',function(ev){
+    acts[0].addEventListener('click',function(ev){ev.stopPropagation();showModal(a);});
+    acts[1].addEventListener('click',function(ev){
       ev.stopPropagation();
       if(confirm('确认删除「'+a.name+'」？将同时删除磁盘文件夹与数据库记录'))
         fetch('/api/delete?poiid='+encodeURIComponent(a.poiid)).then(()=>{hideLayer(a);load();});
@@ -526,6 +591,8 @@ function render(){
 function showModal(a){
   var pts=parsePts(a.coords);
   var xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);
+  var cx=xs.reduce((s,v)=>s+v,0)/pts.length, cy=ys.reduce((s,v)=>s+v,0)/pts.length;
+  var off=Math.round(Math.hypot(cx-a.lng,cy-a.lat)*111000);
   document.getElementById('mTitle').textContent=a.name;
   document.getElementById('mBody').textContent=
     '名称: '+a.name+' | POIID: '+a.poiid+'\\n'
@@ -533,8 +600,9 @@ function showModal(a){
    +'中心经纬度(WGS-84): '+a.lng.toFixed(6)+', '+a.lat.toFixed(6)+'\\n'
     +'面范围: 经度 '+Math.min.apply(null,xs).toFixed(6)+' ~ '+Math.max.apply(null,xs).toFixed(6)
     +' | 纬度 '+Math.min.apply(null,ys).toFixed(6)+' ~ '+Math.max.apply(null,ys).toFixed(6)+'\\n'
-    +'边界点数: '+a.point_count+'\\n\\n'
-    +'边界坐标串(lng,lat):\\n'+a.coords;
+    +'边界点数: '+a.point_count+'\\n'
+    +(off>800?'⚠ 面心与基准点偏差约'+off+'米，疑为高德源数据错位，建议删除！\\n':'')
+    +'\\n边界坐标串(lng,lat):\\n'+a.coords;
   document.getElementById('mask').style.display='flex';
 }
 function closeModal(){document.getElementById('mask').style.display='none';}
