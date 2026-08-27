@@ -299,7 +299,7 @@ async function exportAsSQLite(aois) {
     const city = (a.city || '').replace(/'/g, "''");
     lines.push(`INSERT OR REPLACE INTO aoi VALUES('${a.poiid}','${name}','${addr}','${city}',${a.lng},${a.lat},${a.coords_wgs84.length},'${coords}','${a.created_at}');`);
   }
-  return new Blob([lines.join('\n')], { type: 'text/sql;charset=utf-8 });
+  return new Blob([lines.join('\n')], { type: 'text/sql;charset=utf-8' });
 }
 
 // 扩展安装时初始化数据库 + 保活定时器

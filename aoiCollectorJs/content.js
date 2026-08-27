@@ -1,22 +1,55 @@
 /**
  * Content Script - 注入高德地图页面 (隔离环境)
  * 接收 hook.js (MAIN world) 通过 postMessage 发来的 AOI 数据，显示采集面板
+ * AOI 边界获取策略: 纯被动捕获页面自身的搜索响应 (手动补发请求会被风控419拦截)
  */
 (() => {
   console.log('[AOI采集] === Content script 启动 ===', location.host, new Date().toLocaleTimeString());
   if (window.__aoiPanelReady) { console.log('[AOI采集] 已挂载，跳过'); return; }
   window.__aoiPanelReady = 1;
 
-  // 隔离环境的本地变量，接收 hook.js 发来的数据
-  let aoiLast = null;
-  let aoiRings = {};
+  let aoiLast = null;       // 最近一次 detail/search 捕获的 base 原始JSON
+  let aoiRings = {};        // poiid -> { v, x, y, a, c } 由页面搜索响应累积
+  let pendingSave = null;   // 挂起的保存任务 { base, raw, until }
 
-  // 监听 hook.js (MAIN world) 通过 postMessage 发来的数据
+  // ---- 保存到 background ----
+  function submitSave(base, raw) {
+    const saved = document.getElementById('__aoiPanelSaved');
+    const info = document.getElementById('__aoiPanelInfo');
+    const btn = document.getElementById('__aoiBtn');
+    const payload = { raw, rings: aoiRings };
+    console.log('[AOI采集] 发送保存请求:', base.name);
+    try {
+      chrome.runtime.sendMessage({ type: 'SAVE_AOI', data: payload }, res => {
+        console.log('[AOI采集] 收到响应:', res);
+        if (chrome.runtime.lastError) {
+          console.error('[AOI采集] 消息错误:', chrome.runtime.lastError);
+          if (saved) { saved.style.color = '#e64c3c'; saved.textContent = '通信失败: ' + chrome.runtime.lastError.message; }
+          if (btn) btn.textContent = '采集当前AOI';
+          return;
+        }
+        if (res && res.ok) {
+          if (saved) { saved.style.color = '#52c41a'; saved.textContent = res.msg || '已保存'; }
+          aoiLast = null;
+          if (info) info.textContent = '等待搜索或点击建筑...';
+        } else {
+          if (saved) { saved.style.color = '#e64c3c'; saved.textContent = (res && res.msg) || '保存失败'; }
+        }
+        if (btn) btn.textContent = '采集当前AOI';
+      });
+    } catch(e) {
+      console.error('[AOI采集] sendMessage异常:', e);
+      if (saved) { saved.style.color = '#e64c3c'; saved.textContent = '异常: ' + e.message; }
+      if (btn) btn.textContent = '采集当前AOI';
+    }
+  }
+
+  // ---- 接收 hook.js (MAIN world) 数据 ----
   window.addEventListener('message', (e) => {
     if (e.source !== window) return;
+    const el = document.getElementById('__aoiPanelInfo');
     if (e.data && e.data.type === '__AOI_DETAIL') {
       aoiLast = e.data.data;
-      const el = document.getElementById('__aoiPanelInfo');
       try {
         const d = JSON.parse(aoiLast);
         if (el) el.textContent = '已捕获: ' + (d.data?.base?.name || '?');
@@ -30,10 +63,19 @@
           poiid: e.data.first.id, name: e.data.first.name,
           x: e.data.first.longitude, y: e.data.first.latitude
         }}});
-        const el = document.getElementById('__aoiPanelInfo');
         if (el) el.textContent = '已捕获: ' + e.data.first.name;
       }
       console.log('[AOI采集] 收到 search 数据, AOI数:', Object.keys(aoiRings).length);
+      // 挂起任务获得边界 → 自动继续
+      if (pendingSave && Date.now() < pendingSave.until) {
+        const pid = pendingSave.base.poiid;
+        if (aoiRings[pid] && aoiRings[pid].v) {
+          console.log('[AOI采集] 挂起任务获得AOI边界，自动提交:', pendingSave.base.name);
+          const p = pendingSave;
+          pendingSave = null;
+          submitSave(p.base, p.raw);
+        }
+      }
     }
   });
 
@@ -87,61 +129,21 @@
 
       // 采集按钮
       document.getElementById('__aoiBtn').addEventListener('click', function() {
-        const btn = this, saved = document.getElementById('__aoiPanelSaved'),
-              info = document.getElementById('__aoiPanelInfo');
+        const saved = document.getElementById('__aoiPanelSaved');
         const raw = aoiLast;
         if (!raw) { saved.style.color = '#52c41a'; saved.textContent = '请先搜索或点击目标建筑'; return; }
         let base = {};
         try { base = (JSON.parse(raw).data || {}).base || {}; } catch {}
         if (!base.poiid) { saved.style.color = '#e64c3c'; saved.textContent = '数据异常，请重新点击'; return; }
 
-        btn.textContent = '采集中...';
-        saved.style.color = '#888'; saved.textContent = '正在保存...';
-
-        function submit() {
-          const payload = { raw, rings: aoiRings };
-          console.log('[AOI采集] 发送保存请求:', base.name);
-          try {
-            chrome.runtime.sendMessage({ type: 'SAVE_AOI', data: payload }, res => {
-              console.log('[AOI采集] 收到响应:', res);
-              if (chrome.runtime.lastError) {
-                console.error('[AOI采集] 消息错误:', chrome.runtime.lastError);
-                saved.style.color = '#e64c3c';
-                saved.textContent = '通信失败: ' + chrome.runtime.lastError.message;
-                btn.textContent = '采集当前AOI';
-                return;
-              }
-              if (res && res.ok) {
-                saved.style.color = '#52c41a';
-                saved.textContent = res.msg || '已保存';
-                aoiLast = null;
-                info.textContent = '等待搜索或点击建筑...';
-              } else {
-                saved.style.color = '#e64c3c';
-                saved.textContent = (res && res.msg) || '保存失败';
-              }
-              btn.textContent = '采集当前AOI';
-            });
-          } catch(e) {
-            console.error('[AOI采集] sendMessage异常:', e);
-            saved.style.color = '#e64c3c';
-            saved.textContent = '异常: ' + e.message;
-            btn.textContent = '采集当前AOI';
-          }
-        }
-
         const entry = aoiRings[base.poiid];
-        if (entry && entry.v) { submit(); return; }
-        saved.style.color = '#888'; saved.textContent = '正在获取AOI...';
-        btn.textContent = '采集中...';
-        window.postMessage({ type: '__AOI_FETCH_RING', name: base.name, poiid: base.poiid }, '*');
-        // 等 hook.js 回传数据再 submit
-        let tries = 0;
-        const wait = setInterval(() => {
-          tries++;
-          if (aoiRings[base.poiid] && aoiRings[base.poiid].v) { clearInterval(wait); submit(); }
-          else if (tries > 20) { clearInterval(wait); submit(); }
-        }, 500);
+        if (entry && entry.v) { submitSave(base, raw); return; }
+
+        // 无边界: 被动等待页面自身搜索结果 (60秒窗口)
+        this.textContent = '采集中...';
+        saved.style.color = '#888';
+        saved.textContent = '未捕获边界：请在地图搜索框输入「' + base.name.replace(/\(.*\)$/, '') + '」回车，结果返回后自动继续';
+        pendingSave = { base, raw, until: Date.now() + 60000 };
       });
 
       // 测试连接按钮
