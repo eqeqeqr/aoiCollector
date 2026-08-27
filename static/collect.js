@@ -37,6 +37,15 @@
           }
         }
       }
+      // 搜索命中后直接设为"已捕获"，不用再点地图
+      if(pl.length > 0){
+        var first = pl[0];
+        window.__aoiLast = JSON.stringify({status:'1',data:{base:{
+          poiid:first.id, name:first.name, x:first.longitude, y:first.latitude
+        }}});
+        var el = document.getElementById('__aoiPanelInfo');
+        if(el) el.textContent = '已捕获: ' + first.name;
+      }
     }catch(e){}
   }
 
