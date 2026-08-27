@@ -91,9 +91,14 @@ function parsePts(coords){
 }
 function matched(){
   var kw = document.getElementById('kw').value.trim();
-  return AOIS.filter(function(a){
-    return !kw || a.name.indexOf(kw)>=0 || (a.address||'').indexOf(kw)>=0 || a.poiid.indexOf(kw)>=0;
+  if(!kw) return AOIS;
+  var nameHits = [], addrHits = [];
+  AOIS.forEach(function(a){
+    if(a.name.indexOf(kw) >= 0) nameHits.push(a);
+    else if((a.address||'').indexOf(kw) >= 0) addrHits.push(a);
+    else if(a.poiid.indexOf(kw) >= 0) nameHits.push(a);
   });
+  return nameHits.concat(addrHits);
 }
 function render(){
   var kw = document.getElementById('kw').value.trim();
