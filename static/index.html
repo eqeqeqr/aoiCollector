@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>AOI半自动采集工具 · 控制台</title>
+<style>
+body{margin:0;font-family:Microsoft YaHei,sans-serif;background:#f0f4fa;
+     display:flex;align-items:center;justify-content:center;height:100vh;}
+.card{background:#fff;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.08);
+      padding:42px 56px;text-align:center;max-width:560px;}
+h1{margin:0 0 6px;color:#1677ff;font-size:26px;}
+.sub{color:#888;font-size:13px;margin-bottom:26px;line-height:1.7;}
+.btns{display:flex;gap:18px;justify-content:center;}
+.big{flex:1;padding:20px 10px;border:none;border-radius:10px;cursor:pointer;
+     font-size:17px;font-weight:bold;color:#fff;transition:.15s;}
+.big:hover{transform:translateY(-2px);box-shadow:0 6px 14px rgba(0,0,0,.15);}
+.b1{background:#1677ff;} .b2{background:#52c41a;}
+.tip{margin-top:24px;color:#aaa;font-size:12px;line-height:1.8;text-align:left;}
+.stat{display:inline-block;background:#e6f4ff;color:#1677ff;border-radius:20px;
+      padding:3px 14px;font-size:13px;margin-bottom:18px;}
+.err{color:#e64c3c;margin-top:14px;font-size:13px;min-height:16px;}
+</style></head>
+<body><div class="card">
+  <h1>AOI 半自动采集工具</h1>
+  <div class="sub">在高德地图上点击建筑即可采集其区域边界<br>GCJ-02 自动转 WGS-84 · 数据落盘 shp/geojson/SQLite</div>
+  <div class="stat" id="stat">加载中...</div>
+  <div class="btns">
+    <button class="big b1" id="btnCollect">🏗️ 开始收集<br><small style="font-weight:normal;">新开高德地图标签页</small></button>
+    <button class="big b2" onclick="location.href='/preview'">🗺️ 进入预览<br><small style="font-weight:normal;">地图查看/搜索/管理</small></button>
+  </div>
+  <div class="err" id="err"></div>
+  <div class="tip">
+    · 收集窗口右上角浮窗显示"已捕获"后，点【采集当前AOI】保存<br>
+    · 若提示被风控拦截：稍等再试，或在弹出的浏览器中登录高德账号<br>
+    · 登录弹窗右上角可直接关闭，请勿滑动其中的滑块
+  </div>
+</div>
+<script>
+fetch('/api/list').then(r=>r.json()).then(d=>{
+  document.getElementById('stat').textContent='已采集 '+d.length+' 个 AOI';
+});
+document.getElementById('btnCollect').onclick=function(){
+  var e=document.getElementById('err');
+  e.textContent='正在打开收集标签页...';
+  e.style.color='#888';
+  fetch('/api/collect',{method:'POST'}).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      e.style.color='#52c41a'; e.textContent='✅ 已在浏览器中打开新标签页，请切换过去';
+      setTimeout(function(){ e.textContent=''; },5000);
+    } else {
+      e.style.color='#e64c3c'; e.textContent='❌ '+(d.err||'失败');
+    }
+  }).catch(function(ex){
+    e.style.color='#e64c3c'; e.textContent='❌ '+ex.message;
+  });
+};
+</script></body></html>

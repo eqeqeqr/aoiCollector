@@ -1,2 +1,4 @@
+fastapi>=0.104
+uvicorn>=0.24
 selenium>=4.6
 pyshp>=2.3
