@@ -231,7 +231,7 @@ async function handleSaveAOI(data) {
 
   // 通知 content script 更新面板
   try {
-    const tabs = await chrome.tabs.query({ url: ['https://gaode.com/*', 'https://*.gaode.com/*', 'https://ditu.amap.com/*', 'https://map.amap.com/*'] });
+    const tabs = await chrome.tabs.query({ url: ['https://gaode.com/*', 'https://*.gaode.com/*', 'https://amap.com/*', 'https://*.amap.com/*'] });
     for (const tab of tabs) {
       chrome.tabs.sendMessage(tab.id, { type: 'SAVED', msg }).catch(() => {});
     }
