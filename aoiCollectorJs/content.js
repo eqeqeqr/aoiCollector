@@ -101,10 +101,14 @@
     }
   }
 
+  // 高德全部域名: map.gaode.com / ditu.amap.com / map.amap.com 等
+  const AOI_HOSTS = ['map.gaode.com', 'gaode.com', 'amap.com'];
+  function onAmapHost() { return AOI_HOSTS.some(h => location.host === h || location.host.endsWith('.' + h)); }
+
   // ---- 浮窗 UI ----
   function mount() {
     try {
-      if (location.host.indexOf('gaode.com') < 0) return;
+      if (!onAmapHost()) return;
       if (document.getElementById('__aoiPanel')) return;
       if (!document.body) { setTimeout(mount, 200); return; }
       console.log('[AOI采集] 开始挂载面板');
@@ -214,7 +218,7 @@
 
   // DOM 变化监控: 面板被清除时自动重建
   const observer = new MutationObserver(() => {
-    if (location.host.indexOf('gaode.com') < 0) return;
+    if (!onAmapHost()) return;
     if (!document.getElementById('__aoiPanel') && document.body) {
       console.log('[AOI采集] 面板丢失，重新挂载');
       mount();

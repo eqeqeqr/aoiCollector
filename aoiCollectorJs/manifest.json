@@ -12,20 +12,23 @@
   ],
   "host_permissions": [
     "https://map.gaode.com/*",
-    "https://*.map.gaode.com/*"
+    "https://*.map.gaode.com/*",
+    "https://ditu.amap.com/*",
+    "https://map.amap.com/*",
+    "https://www.amap.com/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://map.gaode.com/*", "https://*.map.gaode.com/*"],
+      "matches": ["https://map.gaode.com/*", "https://*.map.gaode.com/*", "https://ditu.amap.com/*", "https://map.amap.com/*"],
       "js": ["libs/coord.js", "hook.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://map.gaode.com/*", "https://*.map.gaode.com/*"],
+      "matches": ["https://map.gaode.com/*", "https://*.map.gaode.com/*", "https://ditu.amap.com/*", "https://map.amap.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
