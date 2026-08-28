@@ -8,6 +8,7 @@ function load() {
   chrome.runtime.sendMessage({ type: 'GET_ALL' }, res => {
     if (!res || !res.ok) { listEl.innerHTML = '<div class="empty">加载失败</div>'; return; }
     const aois = res.data;
+    aois.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
     countEl.textContent = aois.length + ' 个';
     if (!aois.length) { listEl.innerHTML = '<div class="empty">暂无数据，请先采集</div>'; return; }
     listEl.innerHTML = '';
@@ -74,6 +75,15 @@ document.getElementById('btnExportGJ').addEventListener('click', () => {
 // 预览: 打开在线 GeoJSON 编辑器, 用户导入导出的文件即可预览
 document.getElementById('btnPreview').addEventListener('click', () => {
   chrome.tabs.create({ url: 'https://ky-gis.com/zh/geojson-editor' });
+});
+
+// 清空全部数据
+document.getElementById('btnClearAll').addEventListener('click', () => {
+  if (!confirm('确认清空全部已采集数据？此操作不可恢复。')) return;
+  chrome.runtime.sendMessage({ type: 'CLEAR_ALL' }, res => {
+    if (res && res.ok) load();
+    else alert('清空失败: ' + ((res && res.err) || '未知错误'));
+  });
 });
 
 load();

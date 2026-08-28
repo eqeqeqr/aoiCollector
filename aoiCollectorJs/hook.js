@@ -22,7 +22,8 @@
       const d = JSON.parse(t);
       const pl = (d && d.data && d.data.poi_list) || [];
       const rings = {};
-      for (let i = 0; i < pl.length; i++) {
+      const candidates = [];
+      for (let i = 0; i < Math.min(pl.length, 10); i++) {
         const pp = pl[i], dl = pp.domain_list || [];
         for (let k = 0; k < dl.length; k++) {
           if (dl[k].name === 'aoi' && dl[k].value && dl[k].value.indexOf('_') > 0 && pp.id) {
@@ -31,13 +32,19 @@
               x: pp.longitude, y: pp.latitude,
               a: pp.address || '', c: pp.cityname || ''
             };
+            if (candidates.length < 3) {
+              candidates.push({
+                poiid: pp.id, name: pp.name,
+                x: pp.longitude, y: pp.latitude,
+                a: pp.address || '', c: pp.cityname || ''
+              });
+            }
+            break;
           }
         }
       }
-      if (Object.keys(rings).length > 0) {
-        const first = pl[0];
-        window.postMessage({ type: '__AOI_SEARCH', rings, first }, '*');
-      }
+      const first = pl[0];
+      window.postMessage({ type: '__AOI_SEARCH', rings, first, candidates }, '*');
     } catch {}
   }
 

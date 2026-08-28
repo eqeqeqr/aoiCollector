@@ -58,22 +58,51 @@
     }
     if (e.data && e.data.type === '__AOI_SEARCH') {
       aoiRings = { ...aoiRings, ...e.data.rings };
-      if (e.data.first) {
-        aoiLast = JSON.stringify({ status: '1', data: { base: {
-          poiid: e.data.first.id, name: e.data.first.name,
-          x: e.data.first.longitude, y: e.data.first.latitude
-        }}});
-        if (el) el.textContent = '已捕获: ' + e.data.first.name;
+      const candidates = e.data.candidates || [];
+
+      if (candidates.length > 0) {
+        // 从候选者中选最佳: 主POI优先，否则取第一个有AOI的
+        const primary = e.data.first;
+        const primaryHasAOI = primary && aoiRings[primary.id] && aoiRings[primary.id].v;
+        const selected = primaryHasAOI ? null : candidates[0];
+
+        if (selected) {
+          // 主POI无AOI，用第一个有AOI的候选者替换
+          aoiLast = JSON.stringify({ status: '1', data: { base: {
+            poiid: selected.poiid, name: selected.name,
+            x: selected.x, y: selected.y
+          }}});
+          if (el) el.textContent = '已捕获: ' + selected.name;
+          console.log('[AOI采集] 主POI无AOI，已自动切换:', selected.name);
+        } else {
+          aoiLast = JSON.stringify({ status: '1', data: { base: {
+            poiid: primary.id, name: primary.name,
+            x: primary.longitude, y: primary.latitude
+          }}});
+          if (el) el.textContent = '已捕获: ' + primary.name;
+        }
       }
+
       console.log('[AOI采集] 收到 search 数据, AOI数:', Object.keys(aoiRings).length);
+
       // 挂起任务获得边界 → 自动继续
       if (pendingSave && Date.now() < pendingSave.until) {
-        const pid = pendingSave.base.poiid;
+        // 主POI无AOI时，已切换aoiLast，重新解析poiid
+        let curBase = pendingSave.base;
+        try { curBase = (JSON.parse(aoiLast) || {}).data?.base || curBase; } catch {}
+        const pid = curBase.poiid;
         if (aoiRings[pid] && aoiRings[pid].v) {
-          console.log('[AOI采集] 挂起任务获得AOI边界，自动提交:', pendingSave.base.name);
-          const p = pendingSave;
+          console.log('[AOI采集] 挂起任务获得AOI边界，自动提交:', curBase.name);
           pendingSave = null;
-          submitSave(p.base, p.raw);
+          submitSave(curBase, aoiLast);
+        } else if (candidates.length === 0) {
+          // 返回结果中没有任何AOI数据
+          pendingSave = null;
+          const s2 = document.getElementById('__aoiPanelSaved');
+          const b2 = document.getElementById('__aoiBtn');
+          if (s2) { s2.style.color = '#faad14'; s2.textContent = '暂时无AOI数据'; }
+          if (b2) b2.textContent = '采集当前AOI';
+          console.log('[AOI采集] 搜索结果无AOI数据');
         }
       }
     }
@@ -160,6 +189,7 @@
         if (!raw) { saved.style.color = '#52c41a'; saved.textContent = '请先搜索或点击目标建筑'; return; }
         let base = {};
         try { base = (JSON.parse(raw).data || {}).base || {}; } catch {}
+        if (!base.poiid) base.poiid = base.id;
         if (!base.poiid) { saved.style.color = '#e64c3c'; saved.textContent = '数据异常，请重新点击'; return; }
 
         const entry = aoiRings[base.poiid];

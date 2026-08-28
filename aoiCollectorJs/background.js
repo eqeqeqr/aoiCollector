@@ -68,6 +68,16 @@ async function dbDelete(poiid) {
   });
 }
 
+async function dbClear() {
+  const d = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
 async function dbCount() {
   const d = await openDB();
   return new Promise((resolve, reject) => {
@@ -143,17 +153,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     if (msg.type === 'GET_COUNT') {
       dbCount().then(n => sendResponse({ ok: true, count: n }))
-        .catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
+        .catch(e => { try { sendResponse({ ok: false, err: String(e) }); } catch {} });
       return true;
     }
     if (msg.type === 'GET_ALL') {
       dbGetAll().then(list => sendResponse({ ok: true, data: list }))
-        .catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
+        .catch(e => { try { sendResponse({ ok: false, err: String(e) }); } catch {} });
       return true;
     }
     if (msg.type === 'DELETE_AOI') {
       dbDelete(msg.poiid).then(() => sendResponse({ ok: true }))
-        .catch(e => { try { sendResponse({ ok: false, err: e.message }); } catch {} });
+        .catch(e => { try { sendResponse({ ok: false, err: String(e) }); } catch {} });
+      return true;
+    }
+    if (msg.type === 'CLEAR_ALL') {
+      dbClear().then(() => sendResponse({ ok: true }))
+        .catch(e => { try { sendResponse({ ok: false, err: String(e) }); } catch {} });
       return true;
     }
   } catch(e) {
