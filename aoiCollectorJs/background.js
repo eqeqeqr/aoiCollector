@@ -2,9 +2,45 @@
  * Background Service Worker - 管理数据库 + 消息通信
  * MV3: 使用 IndexedDB 存储 AOI 数据
  */
+importScripts('libs/typecode_map.js', 'libs/xlsx.full.min.js');
+
 const DB_NAME = 'aoi_collector';
 const DB_VERSION = 1;
 const STORE_NAME = 'aois';
+
+let TYPECODE_READY = false;
+
+async function initTypecodeMap() {
+  try {
+    const url = chrome.runtime.getURL('excel/gaode_typecode.xlsx');
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('file not found');
+    const buf = await resp.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+    const ext = {};
+    for (const row of rows) {
+      const code = String(row['NEW_TYPE']);
+      ext[code] = { big: row['大类'], mid: row['中类'], sub: row['小类'] };
+    }
+    Object.assign(TYPECODE_MAP, ext);
+    TYPECODE_READY = true;
+    console.log('[AOI BG] 从Excel加载类型映射:', rows.length, '条');
+  } catch (e) {
+    TYPECODE_READY = true;
+    console.log('[AOI BG] 未找到Excel，使用内置映射');
+  }
+}
+
+function lookupType(typeStr) {
+  const code = String(typeStr || '');
+  const entry = TYPECODE_MAP[code];
+  if (entry) return { typecode: code, big_category: entry.big, mid_category: entry.mid, sub_category: entry.sub };
+  return { typecode: code, big_category: '', mid_category: '', sub_category: '' };
+}
+
+initTypecodeMap();
 
 console.log('[AOI BG] Service Worker 已启动', new Date().toLocaleTimeString());
 
@@ -225,6 +261,8 @@ async function handleSaveAOI(data) {
   const offm = Math.hypot(cx - x, cy - y) * 111000;
   const warn = offm > 800 ? `[警告] 偏差${Math.round(offm)}米，建议核实` : '';
 
+  const tc = lookupType(entry.t || base.newtype || base.typecode);
+
   const aoi = {
     poiid,
     name,
@@ -234,6 +272,10 @@ async function handleSaveAOI(data) {
     lat: y,
     coords_wgs84: pts,
     coords_gcj02: entry.v,
+    typecode: tc.typecode,
+    big_category: tc.big_category,
+    mid_category: tc.mid_category,
+    sub_category: tc.sub_category,
     created_at: new Date().toISOString(),
     warn
   };

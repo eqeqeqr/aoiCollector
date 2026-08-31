@@ -30,13 +30,15 @@
             rings[pp.id] = {
               v: dl[k].value,
               x: pp.longitude, y: pp.latitude,
-              a: pp.address || '', c: pp.cityname || ''
+              a: pp.address || '', c: pp.cityname || '',
+              t: pp.newtype || pp.typecode || ''
             };
             if (candidates.length < 3) {
               candidates.push({
                 poiid: pp.id, name: pp.name,
                 x: pp.longitude, y: pp.latitude,
-                a: pp.address || '', c: pp.cityname || ''
+                a: pp.address || '', c: pp.cityname || '',
+                t: pp.newtype || pp.typecode || ''
               });
             }
             break;

@@ -18,6 +18,7 @@ function load() {
       div.innerHTML = '<div class="info">'
         + '<div class="name">' + esc(a.name) + '</div>'
         + '<div class="meta">' + a.poiid + ' · ' + (a.coords_wgs84 || []).length + '点 · ' + (a.city || '') + '</div>'
+        + (a.big_category ? '<div class="meta">' + esc(a.big_category) + ' > ' + esc(a.mid_category) + ' > ' + esc(a.sub_category) + '</div>' : '')
         + (a.warn ? '<div class="warn">⚠ ' + esc(a.warn) + '</div>' : '')
         + '</div>'
         + '<button class="del" title="删除">✕</button>';
@@ -63,7 +64,11 @@ document.getElementById('btnExportGJ').addEventListener('click', () => {
           ADDRESS: a.address,
           CITY_NAME: a.city,
           LONGITUDE: a.lng,
-          LATITUDE: a.lat
+          LATITUDE: a.lat,
+          TYPECODE: a.typecode || '',
+          BIG_CATEGORY: a.big_category || '',
+          MID_CATEGORY: a.mid_category || '',
+          SUB_CATEGORY: a.sub_category || ''
         },
         geometry: { type: 'Polygon', coordinates: [a.coords_wgs84] }
       }))
