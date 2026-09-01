@@ -11,13 +11,14 @@
   let aoiLast = null;       // 最近一次 detail/search 捕获的 base 原始JSON
   let aoiRings = {};        // poiid -> { v, x, y, a, c } 由页面搜索响应累积
   let pendingSave = null;   // 挂起的保存任务 { base, raw, until }
+  let lastDetailAddress = ''; // detail捕获的address（不被搜索覆盖）
 
   // ---- 保存到 background ----
   function submitSave(base, raw) {
     const saved = document.getElementById('__aoiPanelSaved');
     const info = document.getElementById('__aoiPanelInfo');
     const btn = document.getElementById('__aoiBtn');
-    const payload = { raw, rings: aoiRings };
+    const payload = { raw, rings: aoiRings, detailAddress: lastDetailAddress };
     console.log('[AOI采集] 发送保存请求:', base.name);
     try {
       chrome.runtime.sendMessage({ type: 'SAVE_AOI', data: payload }, res => {
@@ -52,7 +53,9 @@
       aoiLast = e.data.data;
       try {
         const d = JSON.parse(aoiLast);
-        if (el) el.textContent = '已捕获: ' + (d.data?.base?.name || '?');
+        const b = d.data?.base;
+        if (el) el.textContent = '已捕获: ' + (b?.name || '?');
+        lastDetailAddress = b?.address || '';
       } catch {}
       console.log('[AOI采集] 收到 detail 数据');
     }

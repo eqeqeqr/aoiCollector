@@ -214,15 +214,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 async function handleSaveAOI(data) {
-  // data: { raw, rings }
-  let raw, rings;
+  // data: { raw, rings, detailAddress }
+  let raw, rings, detailAddress;
   if (typeof data === 'string') {
     const obj = JSON.parse(data);
     raw = obj.raw;
     rings = obj.rings || {};
+    detailAddress = obj.detailAddress || '';
   } else {
     raw = data.raw;
     rings = data.rings || {};
+    detailAddress = data.detailAddress || '';
   }
 
   const d = JSON.parse(raw);
@@ -267,7 +269,7 @@ async function handleSaveAOI(data) {
     poiid,
     name,
     address_poiinfo: entry.a || '',
-    address_detail: base.address || '',
+    address_detail: detailAddress || base.address || '',
     city: entry.c || base.cityname || '',
     lng: x,
     lat: y,
