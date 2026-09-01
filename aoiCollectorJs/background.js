@@ -266,7 +266,8 @@ async function handleSaveAOI(data) {
   const aoi = {
     poiid,
     name,
-    address: entry.a || base.address || '',
+    address_poiinfo: entry.a || '',
+    address_detail: base.address || '',
     city: entry.c || base.cityname || '',
     lng: x,
     lat: y,

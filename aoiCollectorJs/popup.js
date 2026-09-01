@@ -61,7 +61,8 @@ document.getElementById('btnExportGJ').addEventListener('click', () => {
         properties: {
           NAME: a.name,
           POIID: a.poiid,
-          ADDRESS: a.address,
+          ADDRESS_POIINFO: a.address_poiinfo || '',
+          ADDRESS_DETAIL: a.address_detail || '',
           CITY_NAME: a.city,
           LONGITUDE: a.lng,
           LATITUDE: a.lat,
@@ -74,6 +75,19 @@ document.getElementById('btnExportGJ').addEventListener('click', () => {
       }))
     };
     downloadFile(JSON.stringify(geojson, null, 2), `aoi_${Date.now()}.geojson`, 'application/json;charset=utf-8');
+  });
+});
+
+document.getElementById('btnExportCSV').addEventListener('click', () => {
+  fetchAll(aois => {
+    const headers = ['NAME','POIID','ADDRESS_POIINFO','ADDRESS_DETAIL','CITY_NAME','LONGITUDE','LATITUDE','TYPECODE','BIG_CATEGORY','MID_CATEGORY','SUB_CATEGORY','COORDINATES'];
+    const rows = aois.map(a => {
+      const coords = (a.coords_wgs84 || []).map(p => p[0] + ' ' + p[1]).join(',');
+      return [a.name, a.poiid, a.address_poiinfo, a.address_detail, a.city, a.lng, a.lat, a.typecode, a.big_category, a.mid_category, a.sub_category, coords];
+    });
+    const csv = [headers, ...rows].map(row => row.map(c => '"' + String(c || '').replace(/"/g, '""') + '"').join(',')).join('\n');
+    const bom = '\uFEFF';
+    downloadFile(bom + csv, `aoi_${Date.now()}.csv`, 'text/csv;charset=utf-8');
   });
 });
 

@@ -154,6 +154,7 @@
         + '<span style="font-weight:bold;color:#1677ff;">AOI采集工具</span>'
         + '<span style="font-size:11px;color:#888;">插件版</span></div>'
         + '<div style="color:#999;font-size:11px;margin-bottom:6px;">GCJ-02将自动转为WGS-84</div>'
+        + '<div style="color:#faad14;font-size:11px;margin-bottom:6px;">为数据完整，建议搜索后点击具体建筑再采集</div>'
         + '<div id="__aoiPanelInfo" style="color:#555;margin-bottom:8px;min-height:18px;">等待搜索或点击建筑...</div>'
         + '<div id="__aoiPanelSaved" style="color:#52c41a;margin-bottom:8px;min-height:16px;"></div>'
         + '<button id="__aoiBtn" style="background:#1677ff;color:#fff;border:none;border-radius:4px;'
