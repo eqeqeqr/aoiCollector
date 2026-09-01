@@ -7,7 +7,7 @@
 | 方式 | 部署 | 输出格式 | 适合场景 |
 |------|------|---------|---------|
 | **本地 Web 工具** | Python + Selenium | shp + GeoJSON + SQLite | 批量采集、需要 shp 格式 |
-| **浏览器扩展** | Chrome/Edge 免安装 | GeoJSON | 轻量采集、随时可用 |
+| **浏览器扩展** | Chrome/Edge 免安装 | GeoJSON + CSV | 轻量采集、随时可用 |
 
 ![控制台主页](_static/images/控制台主页.png)
 ![收集模式界面](_static/images/收集模式界面.png)
@@ -83,17 +83,43 @@ Chrome 111+ 及所有 Chromium 内核浏览器（Edge、Brave、Opera 等）。F
 
 1. **点击建筑** → 浮窗显示"已捕获: xxx"
 2. **点【采集当前AOI】** → 若尚未捕获边界，扩展会自动在搜索框执行一次搜索（走页面自身签名管线，不触发风控），拿到边界后自动保存
-3. **点扩展图标** → 查看已采集列表、删除单条、导出 GeoJSON
+3. **点扩展图标** → 查看已采集列表、删除单条、导出 GeoJSON 或 CSV
 4. **在线预览** → 点 popup 中的【预览】按钮，或把导出的 `.geojson` 文件拖入 [ky-gis 在线编辑器](https://ky-gis.com/zh/geojson-editor) 即可在地图上预览
+
+### 输出字段说明
+
+| 字段 | 来源 | 说明 |
+|------|------|------|
+| NAME | detail | POI 名称 |
+| POIID | detail | 高德 POI 唯一标识 |
+| ADDRESS_POIINFO | poiInfo 搜索接口 | 搜索结果中的地址 |
+| ADDRESS_DETAIL | detail 详情接口 | 点击建筑时获取的地址（仅点击建筑时有值） |
+| CITY_NAME | poiInfo / detail | 城市名 |
+| LONGITUDE | poiInfo / detail | 中心点经度（WGS-84） |
+| LATITUDE | poiInfo / detail | 中心点纬度（WGS-84） |
+| TYPECODE | poiInfo | POI 分类编码（优先 newtype，否则 typecode） |
+| BIG_CATEGORY | 映射表 | 大类中文名（如"商务住宅"） |
+| MID_CATEGORY | 映射表 | 中类中文名（如"产业园区"） |
+| SUB_CATEGORY | 映射表 | 小类中文名（如"产业园区"） |
+| COORDINATES | poiInfo | AOI 边界坐标串（WKT 格式：`lon lat,lon lat`） |
+
+> **地址完整性提示**：直接搜索采集时 `ADDRESS_DETAIL` 为空；点击建筑再采集时两个地址都有。面板中有提示建议搜索后点击具体建筑再采集。
+
+### POI 分类编码
+
+扩展内置 915 条高德 POI 分类编码映射（V1.06），自动将 typecode 转换为大类/中类/小类中文名。
+
+支持通过 Excel 文件更新映射：将 `gaode_typecode.xlsx` 放入 `aoiCollectorJs/excel/` 目录，扩展启动时自动读取并覆盖内置数据。
 
 ### 数据存储
 
-扩展数据保存在浏览器 **IndexedDB** 中：关闭浏览器后数据仍在，但删除扩展会连同数据一起删除，且扩展数据不属于 Chrome 同步范围。请及时导出 GeoJSON 备份。
+扩展数据保存在浏览器 **IndexedDB** 中：关闭浏览器后数据仍在，但删除扩展会连同数据一起删除，且扩展数据不属于 Chrome 同步范围。请及时导出 GeoJSON/CSV 备份。
 
 ### 技术要点（MV3）
 
 - **双 content_scripts**：`hook.js` 以 `"world": "MAIN"` 注入页面主环境拦截 fetch/XHR；`content.js` 在隔离环境负责浮窗 UI 与消息通信，两者通过 `postMessage` 桥接
 - **纯被动捕获 + 自动搜索**：不手动补发 API 请求（无风控签名会被 419 拦截），而是自动驱动页面自己的搜索框（原生 setter + 派发 input/Enter 事件）
+- **AOI 候选者自动切换**：搜索结果中主 POI 无 AOI 边界时，自动选取前 3 个有 AOI 的候选者
 - **Service Worker 保活**：`chrome.alarms` 每 30 秒触发；所有消息处理带 try-catch 防崩溃
 - **导出在 popup 执行**：SW 无 `URL.createObjectURL`，文件下载在 popup 上下文完成
 
@@ -111,18 +137,22 @@ aoiCollector/
 │   └── collect.js      # 注入高德页面的采集钩子+浮窗
 ├── aoiCollectorJs/     # Chrome/Edge 浏览器扩展 (MV3)
 │   ├── manifest.json   # 扩展清单 (匹配 *.gaode.com + *.amap.com)
-│   ├── background.js   # Service Worker (IndexedDB 存储 + 保存逻辑)
+│   ├── background.js   # Service Worker (IndexedDB + 分类编码映射)
 │   ├── hook.js         # MAIN world: fetch/XHR 拦截，提取 AOI 数据
 │   ├── content.js      # 隔离环境: 浮窗 UI + 自动搜索触发
 │   ├── popup.html      # 扩展弹窗界面
-│   ├── popup.js        # 扩展弹窗逻辑 (列表/删除/GeoJSON导出/预览入口)
+│   ├── popup.js        # 弹窗逻辑 (列表/删除/GeoJSON/CSV导出/预览)
 │   ├── libs/
-│   │   └── coord.js    # GCJ-02 → WGS-84 坐标转换
+│   │   ├── coord.js    # GCJ-02 → WGS-84 坐标转换
+│   │   ├── typecode_map.js  # POI分类编码映射 (915条, 由Excel生成)
+│   │   └── xlsx.full.min.js # SheetJS (运行时解析Excel更新映射)
+│   ├── excel/
+│   │   └── gaode_typecode.xlsx  # POI分类编码表 (可更新)
 │   └── icons/          # 扩展图标 (16/48/128px)
 ├── requirements.txt    # Python 依赖: fastapi, uvicorn, selenium, pyshp
 ├── aoi.sqlite          # SQLite 数据库 (Web 工具方式)
 ├── aoiCollectorJs.zip  # 扩展打包备份
-└── output/             # 采集结果目录 (Web 工具方式, 约 50 个已采集 AOI)
+└── output/             # 采集结果目录 (Web 工具方式)
 ```
 
 ## 注意事项
